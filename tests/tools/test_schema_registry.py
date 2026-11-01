@@ -304,8 +304,8 @@ def test_all_expected_tools_registered():
         "set_friend_add_request", "set_group_add_request", "summarize_chat_history",
         "summarize_conversation", "filter_archive_records", "recall_history",
         "start_agent_task",
-        "no_action", "schedule_wakeup",
-        "eat", "sleep",
+        "no_action", "schedule_wakeup", "chat_selection",
+        "eat", "sleep", "work",
         "tool_search",
         "describe_image", "web_search", "web_fetch", "get_weather",
         "send_voice_message",
@@ -481,7 +481,7 @@ def test_registry_persona_dual_tool_includes_eat_and_sleep():
 
     assert "eat" in reg
     assert "sleep" in reg
-    assert {"eat", "sleep"}.issubset(FULL_SCHEMA_TOOLS)
+    assert {"eat", "sleep", "work", "chat_selection"}.issubset(FULL_SCHEMA_TOOLS)
 
 
 @pytest.mark.asyncio
@@ -506,13 +506,20 @@ async def test_persona_tools_without_persona_agent_return_unavailable():
         "sleep",
         {"duration_minutes": 90, "reason": "午休"},
     )
+    work_result = await executor(
+        "work",
+        {"duration_minutes": 60, "reason": "整理容器资料"},
+    )
 
     _assert_tool_result_envelope(eat_result, "eat")
     _assert_tool_result_envelope(sleep_result, "sleep")
+    _assert_tool_result_envelope(work_result, "work")
     assert eat_result["ok"] is False
     assert eat_result["status"] == "unavailable"
     assert sleep_result["ok"] is False
     assert sleep_result["status"] == "unavailable"
+    assert work_result["ok"] is False
+    assert work_result["status"] == "unavailable"
 
 
 @pytest.mark.asyncio
@@ -521,6 +528,7 @@ async def test_persona_tools_call_persona_agent_and_sleep_reason_compatibility()
         def __init__(self) -> None:
             self.eat_calls: list[tuple[str, int, str]] = []
             self.sleep_calls: list[tuple[int, str]] = []
+            self.work_calls: list[tuple[int, str]] = []
 
         async def on_eat_start(
             self,
@@ -539,6 +547,15 @@ async def test_persona_tools_call_persona_agent_and_sleep_reason_compatibility()
         ) -> dict:
             self.sleep_calls.append((duration_minutes, reason))
             return {"status": "started", "record_id": "sleep-1"}
+
+        async def on_work_start(
+            self,
+            duration_minutes: int,
+            *,
+            reason: str,
+        ) -> dict:
+            self.work_calls.append((duration_minutes, reason))
+            return {"status": "started", "action_until": 9999.0}
 
     class DurationOnlySleepPersonaAgent:
         def __init__(self) -> None:
@@ -569,9 +586,14 @@ async def test_persona_tools_call_persona_agent_and_sleep_reason_compatibility()
         "sleep",
         {"duration_minutes": 90, "reason": "午休"},
     )
+    work_result = await executor(
+        "work",
+        {"duration_minutes": 60, "reason": "整理容器资料"},
+    )
 
     assert agent.eat_calls == [("早餐", 20, "豆浆和包子")]
     assert agent.sleep_calls == [(90, "午休")]
+    assert agent.work_calls == [(60, "整理容器资料")]
     assert eat_result["ok"] is True
     assert eat_result["status"] == "started"
     assert eat_result["result"]["record_id"] == "eat-1"
@@ -579,6 +601,10 @@ async def test_persona_tools_call_persona_agent_and_sleep_reason_compatibility()
     assert sleep_result["status"] == "started"
     assert sleep_result["reason"] == "午休"
     assert sleep_result["result"]["record_id"] == "sleep-1"
+    assert work_result["ok"] is True
+    assert work_result["status"] == "started"
+    assert work_result["reason"] == "整理容器资料"
+    assert work_result["result"]["action_until"] == 9999.0
 
     duration_only_agent = DurationOnlySleepPersonaAgent()
     duration_only_executor = reg.get_executor(

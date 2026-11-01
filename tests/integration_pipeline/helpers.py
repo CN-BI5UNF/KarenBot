@@ -118,6 +118,11 @@ class RecordingPersonaAgent:
             return False
         return self.action_until is None or self.action_until > time.time()
 
+    def is_working(self) -> bool:
+        if self.current_action != "working":
+            return False
+        return self.action_until is None or self.action_until > time.time()
+
     async def after_turn(
         self,
         conversation_id: str,

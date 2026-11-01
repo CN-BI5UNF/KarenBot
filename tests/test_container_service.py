@@ -150,6 +150,176 @@ async def test_prepare_pulls_missing_image_when_enabled(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_browse_files_returns_structured_sanitized_entries(tmp_path, monkeypatch):
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        platform_name="Linux",
+    )
+    calls: list[list[str]] = []
+
+    async def no_start() -> None:
+        return None
+
+    async def fake_run(args, **kwargs):
+        calls.append(list(args))
+        return _ok(
+            json.dumps(
+                {
+                    "entries": [
+                        {
+                            "name": "b.txt",
+                            "path": "/workspace/b.txt",
+                            "type": "file",
+                            "size": 12,
+                            "mtime": 1700000000.5,
+                            "mode": "0644",
+                            "target": "",
+                        },
+                        {
+                            "name": "notes",
+                            "path": "/workspace/notes",
+                            "type": "dir",
+                            "size": 4096,
+                            "mtime": 1700000001,
+                            "mode": "0755",
+                            "target": "",
+                        },
+                        {
+                            "name": "link",
+                            "path": "/workspace/link",
+                            "type": "symlink",
+                            "size": 2,
+                            "mtime": 0,
+                            "mode": "0777",
+                            "target": "/etc/passwd",
+                        },
+                        {
+                            "name": "bad\x01name",
+                            "path": "/workspace/bad",
+                            "type": "file",
+                            "size": 0,
+                            "mtime": 0,
+                            "mode": "0644",
+                            "target": "",
+                        },
+                    ],
+                    "truncated": False,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    monkeypatch.setattr(service, "ensure_running", no_start)
+    monkeypatch.setattr(service, "_run", fake_run)
+
+    result = await service.browse_files("/workspace")
+
+    assert result["parent"] is None
+    assert result["count"] == 3
+    assert [item["name"] for item in result["entries"]] == [
+        "notes",
+        "b.txt",
+        "link",
+    ]
+    assert result["entries"][0]["type"] == "dir"
+    assert result["entries"][2]["target"] == "/etc/passwd"
+    assert all("\x01" not in item["name"] for item in result["entries"])
+    assert calls[0][5:7] == ["/workspace", "1000"]
+    assert calls[0][:4] == ["exec", "karen-container", "python3", "-c"]
+    assert calls[0][5:7] == ["/workspace", "1000"]
+
+
+@pytest.mark.asyncio
+async def test_browse_files_rejects_paths_outside_workspace(tmp_path):
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        platform_name="Linux",
+    )
+    with pytest.raises(ContainerError) as error:
+        await service.browse_files("/etc")
+    assert error.value.code == "container_path_forbidden"
+
+
+@pytest.mark.asyncio
+async def test_browse_files_maps_helper_errors(tmp_path, monkeypatch):
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        platform_name="Linux",
+    )
+
+    async def no_start() -> None:
+        return None
+
+    async def fake_run(args, **kwargs):
+        return CommandResult(
+            returncode=2,
+            stdout=json.dumps(
+                {"error": "路径不是目录", "code": "not_directory"},
+                ensure_ascii=False,
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(service, "ensure_running", no_start)
+    monkeypatch.setattr(service, "_run", fake_run)
+    with pytest.raises(ContainerError) as error:
+        await service.browse_files("/workspace/file.txt")
+    assert error.value.code == "container_not_directory"
+
+
+@pytest.mark.asyncio
+async def test_preview_file_returns_text_and_binary_metadata(tmp_path, monkeypatch):
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        platform_name="Linux",
+    )
+
+    async def no_start() -> None:
+        return None
+
+    payloads = [
+        {
+            "name": "a.txt",
+            "path": "/workspace/a.txt",
+            "size": 5,
+            "mtime": 1700000000,
+            "mode": "0644",
+            "content": "hello",
+            "binary": False,
+            "truncated": False,
+        },
+        {
+            "name": "blob.bin",
+            "path": "/workspace/blob.bin",
+            "size": 3,
+            "mtime": 1700000000,
+            "mode": "0600",
+            "content": "",
+            "binary": True,
+            "truncated": True,
+        },
+    ]
+
+    async def fake_run(args, **kwargs):
+        return _ok(json.dumps(payloads.pop(0), ensure_ascii=False))
+
+    monkeypatch.setattr(service, "ensure_running", no_start)
+    monkeypatch.setattr(service, "_run", fake_run)
+
+    text = await service.preview_file("/workspace/a.txt")
+    assert text["content"] == "hello"
+    assert text["binary"] is False
+    binary = await service.preview_file("/workspace/blob.bin")
+    assert binary["binary"] is True
+    assert binary["content"] == ""
+    assert binary["truncated"] is True
+
+
+@pytest.mark.asyncio
 async def test_prepare_pulls_from_mirror_and_tags_original_name(tmp_path):
     class MirrorDocker(FakeDocker):
         def __init__(self) -> None:

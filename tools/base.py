@@ -170,6 +170,8 @@ class ToolContext:
     """永久历史归档（recall_history 等工具使用）。"""
 
     vision: IVisionService | None = None
+    main_vision: IVisionService | None = None
+    """主模型原生图片输入兜底；独立视觉服务未开启时由 Runtime 注入。"""
     web_search: IWebSearchService | None = None
     web_fetch: IWebFetchService | None = None
     """官方网页抓取服务；仅当 provider 声明了 Fetch 通道时由 Runtime 注入。"""
@@ -185,6 +187,9 @@ class ToolContext:
 
     wakeup_cb: WakeupCallback | None = None
     """schedule_wakeup 工具触发时调用。"""
+
+    chat_selection_cb: Callable[..., Any] | None = None
+    """chat_selection 工具触发时更新群聊接收范围。"""
 
     workspace_dir: Path | None = None
     """AI 工作目录（data/workspace/）。所有文件类工具操作都被限制在这个目录下。

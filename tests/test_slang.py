@@ -62,7 +62,7 @@ def test_only_confirmed_with_meaning_is_injected_and_scoped_per_group(tmp_path):
     assert "evidence" not in context and "sources" not in context
 
 
-def test_upsert_increments_and_rejected_is_not_reopened(tmp_path):
+def test_duplicate_ai_application_is_auto_rejected_and_visible(tmp_path):
     store = SlangStore(tmp_path / "slang.json")
     first = store.upsert_candidates(
         persona_id="p",
@@ -74,16 +74,104 @@ def test_upsert_increments_and_rejected_is_not_reopened(tmp_path):
         conversation_id="group:1",
         candidates=[{"content": "难绷", "meaning": "无语"}],
     )[0]
-    assert first["id"] == second["id"]
-    assert second["count"] == 2
+    assert second["id"] != first["id"]
+    assert second["status"] == "rejected"
+    assert second["rejection_code"] == "duplicate_term"
+    assert "同名词条" in second["rejection_reason"]
     assert second["meaning"] == "无语"
+    entries = store.list_entries(include_other_personas=True)
+    canonical = next(item for item in entries if item["id"] == first["id"])
+    assert canonical["status"] == "candidate"
+    assert canonical["count"] == 1
+    assert canonical["meaning"] == ""
+    assert len(entries) == 2, "重复申请必须仍然可见"
+
+    third = store.upsert_candidates(
+        persona_id="another",
+        conversation_id="group:1",
+        candidates=[{"content": "难绷", "usage": "看到离谱内容时"}],
+    )[0]
+    assert third["id"] == second["id"]
+    assert third["count"] == 2
+    assert third["usage"] == "看到离谱内容时"
+    assert len(store.list_entries(include_other_personas=True)) == 2
+
     store.update_entry(first["id"], {"status": "rejected"})
     again = store.upsert_candidates(
         persona_id="p",
         conversation_id="group:1",
         candidates=[{"content": "难绷"}],
     )
-    assert again == []
+    assert len(again) == 1
+    assert again[0]["id"] == second["id"]
+    assert again[0]["status"] == "rejected"
+
+
+def test_rejected_duplicate_cannot_become_active_while_canonical_exists(tmp_path):
+    store = SlangStore(tmp_path / "slang.json")
+    store.add_manual(
+        persona_id="p",
+        conversation_id="group:1",
+        content="难绷",
+        meaning="无语、绷不住",
+    )
+    rejection = store.upsert_candidates(
+        persona_id="p",
+        conversation_id="group:1",
+        candidates=[{"content": "难绷", "meaning": "另一个释义"}],
+    )[0]
+    with pytest.raises(ValueError, match="同群已有"):
+        store.update_entry(
+            rejection["id"],
+            {"status": "confirmed", "meaning": "另一个释义"},
+        )
+    with pytest.raises(ValueError, match="同群已有"):
+        store.update_entry(rejection["id"], {"status": "candidate"})
+
+
+def test_search_matches_slang_fields_and_filtered_stats(tmp_path):
+    store = SlangStore(tmp_path / "slang.json")
+    store.add_manual(
+        persona_id="p",
+        conversation_id="group:1",
+        content="难绷",
+        meaning="无语、绷不住",
+        usage="看到离谱内容时",
+    )
+    store.add_manual(
+        persona_id="p",
+        conversation_id="group:1",
+        content="yyds",
+        meaning="永远的神",
+    )
+    store.upsert_candidates(
+        persona_id="p",
+        conversation_id="group:2",
+        candidates=[{"content": "草", "meaning": "笑死"}],
+    )
+    assert [
+        item["content"] for item in store.list_entries(
+            include_other_personas=True, query="YYDS"
+        )
+    ] == ["yyds"]
+    assert [
+        item["content"] for item in store.list_entries(
+            include_other_personas=True, query="离谱"
+        )
+    ] == ["难绷"]
+    assert [
+        item["content"] for item in store.list_entries(
+            include_other_personas=True, query="笑死"
+        )
+    ] == ["草"]
+    assert store.list_entries(include_other_personas=True, query="不存在") == []
+    stats = store.stats(
+        include_other_personas=True,
+        conversation_id="group:1",
+        query="永远",
+    )
+    assert stats["total"] == 1
+    assert stats["counts"]["confirmed"] == 1
 
 
 def test_manual_entry_requires_meaning_and_group_scope(tmp_path):
@@ -242,6 +330,78 @@ async def test_slang_api_manual_crud_and_confirmation(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_slang_api_search_returns_filtered_entries_and_stats(tmp_path):
+    store = SlangStore(tmp_path / "slang.json")
+    store.add_manual(
+        persona_id="p",
+        conversation_id="group:1",
+        content="难绷",
+        meaning="无语、绷不住",
+    )
+    store.add_manual(
+        persona_id="p",
+        conversation_id="group:2",
+        content="yyds",
+        meaning="永远的神",
+    )
+    service = SlangService(
+        tmp_path,
+        persona_id="p",
+        config=_config(),
+        provider_resolver=lambda: (FakeProvider([]), SimpleNamespace(model="m")),
+    )
+    request = _request(service)
+    result = await slang_api.list_slang(request, q="无语")
+    assert result["matched"] == 1
+    assert result["entries"][0]["content"] == "难绷"
+    assert result["stats"]["total"] == 1
+    assert result["query"] == "无语"
+
+
+@pytest.mark.asyncio
+async def test_slang_api_lists_and_edits_other_persona_entries(tmp_path):
+    store = SlangStore(tmp_path / "slang.json")
+    entry = store.add_manual(
+        persona_id="p2",
+        conversation_id="group:1",
+        content="难绷",
+        meaning="无语、绷不住",
+    )
+    service = SlangService(
+        tmp_path,
+        persona_id="p1",
+        config=_config(),
+        provider_resolver=lambda: (FakeProvider([]), SimpleNamespace(model="m")),
+    )
+    request = _request(service)
+
+    listed = await slang_api.list_slang(request, conversation_id="group:1")
+    assert listed["ok"] is True
+    assert listed["shared_across_personas"] is True
+    assert listed["entries"][0]["persona_id"] == "p2"
+    assert listed["stats"]["total"] == 1
+
+    updated = await slang_api.update_slang(
+        request, entry["id"], {"meaning": "绷不住，表示无语"}
+    )
+    assert updated["entry"]["meaning"] == "绷不住，表示无语"
+    assert (
+        SlangStore(tmp_path / "slang.json")
+        .list_entries(include_other_personas=True)[0]["meaning"]
+        == "绷不住，表示无语"
+    )
+
+    deleted = await slang_api.delete_slang(request, entry["id"])
+    assert deleted["ok"] is True
+    assert (
+        SlangStore(tmp_path / "slang.json").list_entries(
+            include_other_personas=True
+        )
+        == []
+    )
+
+
+@pytest.mark.asyncio
 async def test_slang_api_learn_endpoint(tmp_path):
     provider = FakeProvider([{"content": "草", "meaning": "笑", "source_id": "1"}])
     service = SlangService(
@@ -318,6 +478,189 @@ def test_slang_service_lookup_filters_group_and_status(tmp_path):
 
     assert service.lookup("private:1")["ok"] is False
     assert service.lookup("group:1", query="不存在的词")["returned"] == 0
+
+
+def test_slang_is_shared_across_personas_within_the_same_group(tmp_path):
+    store = SlangStore(tmp_path / "slang.json")
+    store.add_manual(
+        persona_id="p1",
+        conversation_id="group:1",
+        content="难绷",
+        meaning="无语、绷不住",
+    )
+    store.add_manual(
+        persona_id="p2",
+        conversation_id="group:1",
+        content="yyds",
+        meaning="永远的神",
+    )
+    store.add_manual(
+        persona_id="p2",
+        conversation_id="group:2",
+        content="草",
+        meaning="笑",
+    )
+    service = SlangService(
+        tmp_path,
+        persona_id="p3",
+        config=_config(),
+        provider_resolver=lambda: (None, None),
+    )
+
+    result = service.lookup("group:1")
+    contents = {entry["content"] for entry in result["entries"]}
+    assert contents == {"难绷", "yyds"}
+    assert "草" not in str(result["entries"])
+
+    listed = service.list_entries(conversation_id="group:1")
+    assert {entry["persona_id"] for entry in listed} == {"p1", "p2"}
+    assert service.stats()["total"] == 3
+    assert "难绷" in service.build_context("group:1")
+    assert "草" not in service.build_context("group:1")
+    assert service.conversations() == ["group:1", "group:2"]
+
+
+def test_shared_slang_writes_dedupe_across_personas(tmp_path):
+    store = SlangStore(tmp_path / "slang.json")
+    confirmed = store.add_manual(
+        persona_id="p1",
+        conversation_id="group:1",
+        content="难绷",
+        meaning="无语、绷不住",
+    )
+    with pytest.raises(ValueError, match="共享"):
+        store.add_manual(
+            persona_id="p2",
+            conversation_id="group:1",
+            content="难绷",
+            meaning="重复",
+        )
+    changed = store.upsert_candidates(
+        persona_id="p2",
+        conversation_id="group:1",
+        candidates=[{"content": "难绷", "usage": "看到离谱内容时"}],
+    )
+    assert changed[0]["id"] != confirmed["id"]
+    assert changed[0]["status"] == "rejected"
+    assert changed[0]["rejection_code"] == "duplicate_term"
+    stored = store.list_entries(include_other_personas=True)
+    canonical = next(item for item in stored if item["id"] == confirmed["id"])
+    assert canonical["status"] == "confirmed"
+    assert canonical["count"] == 1
+    assert canonical["usage"] == ""
+    assert len(stored) == 2, "重复申请作为拒绝记录保留，但原词条不被改写"
+
+    other = store.add_manual(
+        persona_id="p2",
+        conversation_id="group:1",
+        content="yyds",
+        meaning="永远的神",
+    )
+    with pytest.raises(ValueError, match="共享"):
+        store.update_entry(confirmed["id"], {"content": other["content"]})
+
+
+def test_compact_shared_duplicates_preserves_auto_rejection_rows(tmp_path):
+    store = SlangStore(tmp_path / "slang.json")
+    canonical = store.add_manual(
+        persona_id="p1",
+        conversation_id="group:1",
+        content="难绷",
+        meaning="无语、绷不住",
+    )
+    rejection = store.upsert_candidates(
+        persona_id="p2",
+        conversation_id="group:1",
+        candidates=[{"content": "难绷", "meaning": "另一个释义"}],
+    )[0]
+    service = SlangService(
+        tmp_path,
+        persona_id="p3",
+        config=_config(),
+        provider_resolver=lambda: (None, None),
+    )
+    entries = service.list_entries(conversation_id="group:1")
+    assert len(entries) == 2
+    stored_canonical = next(
+        item for item in entries if item["id"] == canonical["id"]
+    )
+    stored_rejection = next(
+        item for item in entries if item["id"] == rejection["id"]
+    )
+    assert stored_canonical["status"] == "confirmed"
+    assert stored_rejection["rejection_code"] == "duplicate_term"
+
+
+def test_compact_shared_duplicates_merges_legacy_persona_rows(tmp_path):
+    path = tmp_path / "slang.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "a",
+                    "persona_id": "p1",
+                    "conversation_id": "group:1",
+                    "content": "难绷",
+                    "meaning": "无语、绷不住",
+                    "status": "confirmed",
+                    "count": 2,
+                    "sources": ["s1"],
+                    "evidence": [
+                        {"key": "1", "sender": "A", "text": "a", "time": "t1"}
+                    ],
+                    "created_at": "2026-10-01T10:00:00+08:00",
+                    "updated_at": "2026-10-02T10:00:00+08:00",
+                },
+                {
+                    "id": "b",
+                    "persona_id": "p2",
+                    "conversation_id": "group:1",
+                    "content": "难绷",
+                    "meaning": "另一个释义",
+                    "usage": "看到离谱内容时",
+                    "status": "candidate",
+                    "count": 1,
+                    "sources": ["s2"],
+                    "evidence": [
+                        {"key": "2", "sender": "B", "text": "b", "time": "t2"}
+                    ],
+                    "created_at": "2026-10-03T10:00:00+08:00",
+                    "updated_at": "2026-10-03T10:00:00+08:00",
+                },
+                {
+                    "id": "c",
+                    "persona_id": "p2",
+                    "conversation_id": "group:2",
+                    "content": "难绷",
+                    "meaning": "别的群的释义",
+                    "status": "confirmed",
+                    "count": 1,
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    service = SlangService(
+        tmp_path,
+        persona_id="p3",
+        config=_config(),
+        provider_resolver=lambda: (None, None),
+    )
+    entries = service.list_entries()
+    assert len(entries) == 2
+    merged = next(
+        entry for entry in entries if entry["conversation_id"] == "group:1"
+    )
+    assert merged["status"] == "confirmed"
+    assert merged["persona_id"] == "p1"
+    assert merged["meaning"] == "无语、绷不住"
+    assert merged["usage"] == "看到离谱内容时"
+    assert merged["count"] == 3
+    assert set(merged["sources"]) == {"s1", "s2"}
+    assert len(merged["evidence"]) == 2
+    assert list(tmp_path.glob("slang.json.shared-merge-*"))
+    assert len(json.loads(path.read_text(encoding="utf-8"))) == 2
 
 
 def test_task_context_adds_time_sense_for_old_messages():

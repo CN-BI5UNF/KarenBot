@@ -182,7 +182,7 @@ class PipelineAgentTasksMixin:
                 "get_recent_chat_messages",
                 "recall_history",
             }
-            if self.vision is not None:
+            if self.vision is not None or getattr(self, "main_vision", None) is not None:
                 allowed.add("describe_image")
             sub_registry = ToolRegistry(
                 [spec for spec in get_default_specs() if spec.name in allowed]
@@ -192,6 +192,7 @@ class PipelineAgentTasksMixin:
                 history=self.history,
                 archive=self.archive,
                 vision=self.vision,
+                main_vision=getattr(self, "main_vision", None),
                 workspace_dir=self.workspace_dir,
                 conversation_id=conversation_id,
                 default_history_fetch_count=self.behavior_cfg.default_history_fetch_count,
@@ -206,6 +207,10 @@ class PipelineAgentTasksMixin:
                     "chat_timeline": self.chat_timeline,
                     "tool_registry": sub_registry,
                     "tool_search_approved_tools": set(),
+                    "persona_image_store": getattr(self, "persona_image_store", None),
+                    "persona_name": str(
+                        getattr(getattr(self, "persona", None), "name", "") or ""
+                    ),
                 },
             )
             output_rel = _workspace_rel(output_path, self.workspace_dir)

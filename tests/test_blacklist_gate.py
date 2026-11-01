@@ -90,6 +90,21 @@ async def test_apply_blacklist_is_hot(build_pipeline):
     assert _conversations(pipeline) == ["private:10001"]
 
 
+async def test_apply_whitelist_is_hot(build_pipeline):
+    from app_config.schema import WhitelistConfig
+
+    pipeline, _provider, _adapter, _history, _important = await build_pipeline([])
+
+    pipeline.apply_whitelist(WhitelistConfig(mode="whitelist", qq_ids=[10001]))
+    await pipeline.enqueue(_msg(user_id="10001", text="允许"))
+    await pipeline.enqueue(_msg(user_id="20002", text="不允许"))
+    assert _conversations(pipeline) == ["private:10001"]
+
+    pipeline.apply_whitelist(WhitelistConfig(mode="open"))
+    await pipeline.enqueue(_msg(user_id="20002", text="现在允许"))
+    assert _conversations(pipeline) == ["private:10001", "private:20002"]
+
+
 async def test_blacklist_takes_priority_over_open_whitelist(build_pipeline):
     """白名单设为 open（对所有人开放）时，黑名单依然拦得住。"""
     from app_config.schema import WhitelistConfig

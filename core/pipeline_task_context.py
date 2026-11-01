@@ -43,6 +43,22 @@ class PipelineTaskContextMixin:
             if lookup_hint:
                 parts.append(lookup_hint)
 
+        selection = getattr(self, "group_chat_selection", None)
+        if selection is not None:
+            snapshot = selection.snapshot()
+            if snapshot.get("active"):
+                if snapshot.get("mode") == "pause":
+                    parts.append(
+                        "群聊聊天选择：当前暂停接收普通群消息，只有 @ 消息会送达；"
+                        "需要恢复正常时调用 chat_selection mode=all。"
+                    )
+                elif snapshot.get("mode") == "selected":
+                    ids = "、".join(str(item) for item in snapshot.get("group_ids") or [])
+                    parts.append(
+                        f"群聊聊天选择：当前只接收群 {ids} 的普通消息；"
+                        "其他群的 @ 消息仍会送达。需要恢复时调用 chat_selection mode=all。"
+                    )
+
         pending_info = self.pending_requests.to_prompt_text()
         if pending_info:
             parts.append(pending_info)

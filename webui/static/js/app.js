@@ -1,7 +1,7 @@
 // KarenBot WebUI 外壳：登录 → （首次配置）→ 仪表盘路由。
 //
 // 导航结构照搬原 PySide6 仪表盘（ui/dashboard/layout.py 的 NAV_ITEMS），
-// 顺序、中文标题一致，末尾追加 WebUI 新增的「黑名单」。
+// 顺序、中文标题一致，末尾追加 WebUI 新增的「黑白名单」。
 
 import { h, fill, qs, formatDuration, empty } from './dom.js';
 import { api, endpoints, setUnauthorizedHandler } from './api.js';
@@ -37,8 +37,8 @@ const NAV_ITEMS = [
   { key: 'models', title: '模型管理', icon: 'models', page: models },
   { key: 'emoji', title: '表情包', icon: 'emoji', page: emoji },
   { key: 'container', title: '容器', icon: 'container', page: containerPage },
-  { key: 'storage', title: '存储与缓存', icon: 'storage', page: storage },
-  { key: 'blacklist', title: '黑名单', icon: 'blacklist', page: blacklist },
+  { key: 'storage', title: '存储与数据', icon: 'storage', page: storage },
+  { key: 'blacklist', title: '黑白名单', icon: 'blacklist', page: blacklist },
   { key: 'settings', title: '设置', icon: 'settings', page: settings },
 ];
 
@@ -113,12 +113,20 @@ function applyStatus(status) {
 // 路由
 // ============================================================
 
+const ROUTE_ALIASES = { data_admin: 'storage' };
+
+function normalizeRouteKey(key) {
+  const raw = String(key || '').trim();
+  return ROUTE_ALIASES[raw] || raw;
+}
+
 function currentRouteKey() {
-  const fromHash = location.hash.replace(/^#\/?/, '');
+  const fromHash = normalizeRouteKey(location.hash.replace(/^#\/?/, ''));
   return NAV_ITEMS.some((x) => x.key === fromHash) ? fromHash : 'overview';
 }
 
 async function navigate(key, { force = false, section = null } = {}) {
+  key = normalizeRouteKey(key);
   const item = NAV_ITEMS.find((x) => x.key === key);
   if (!item) return;
   if (section && key === 'settings') {

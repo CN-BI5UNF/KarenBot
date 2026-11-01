@@ -1319,6 +1319,8 @@ async def test_runtime_injects_native_vision_limits_and_profile(assembled_projec
         await rt.start()
 
         assert rt.vision is None
+        assert rt.main_vision is not None
+        assert rt.pipeline.main_vision is rt.main_vision
         assert rt.pipeline.main_model_images_enabled is True
         assert rt.pipeline.image_limits.max_images_per_request == 3
         assert rt.pipeline._image_budget_profile is not None

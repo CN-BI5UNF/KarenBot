@@ -43,6 +43,9 @@ async def test_save_raw_prompt_without_ai_or_personality_field(persona_root):
     assert result["size"] == len(content)
     source = await read_prompt_source(request, "小晚")
     assert source["xml"] == content
+    saved = (persona_root.PERSONAS_DIR / "小晚" / "persona_prompt.py").read_text("utf-8")
+    assert 'PERSONA_PROMPT = """' in saved
+    assert "你是谁\n\n直接写" in saved
     assert source["vars"]["name"] == "小晚"
     assert source["vars"]["age"] == 24
     assert source["vars"]["admins"] == [{"qq": 12345, "name": "老王", "role": "owner"}]

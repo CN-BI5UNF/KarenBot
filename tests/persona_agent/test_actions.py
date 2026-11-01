@@ -550,6 +550,44 @@ async def test_sleep_and_eat_disabled_or_tool_records(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_work_state_clamps_to_user_limit(monkeypatch):
+    db = FakeDB(PersonaState(last_tick_at=1000.0))
+    agent = _agent(db, pm_cfg=_pm_cfg(work_max_minutes=90))
+
+    monkeypatch.setattr(persona_agent_mod.time, "time", lambda: 1000.0)
+    await agent.start()
+    result = await agent.on_work_start(240, reason="整理容器资料")
+
+    assert result["status"] == "started"
+    assert result["duration_minutes"] == 90
+    assert result["action_until"] == 6400.0
+    assert result["reason"] == "整理容器资料"
+    snapshot = agent.get_state_snapshot()
+    assert snapshot.current_action == "working"
+    assert snapshot.action_until == 6400.0
+    assert agent.is_working() is True
+    assert db.logs[-1]["event"] == "work_start"
+
+    monkeypatch.setattr(persona_agent_mod.time, "time", lambda: 6400.1)
+    assert agent.is_working() is False
+    assert (await agent.on_work_end("expired"))["status"] == "ended"
+    assert agent.get_state_snapshot().current_action == "awake"
+    assert db.logs[-1]["event"] == "work_end"
+    assert (await agent.on_work_end("expired"))["status"] == "idle"
+    await agent.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_work_disabled_by_zero_limit(monkeypatch):
+    agent = _agent(FakeDB(), pm_cfg=_pm_cfg(work_max_minutes=0))
+    monkeypatch.setattr(persona_agent_mod.time, "time", lambda: 1000.0)
+    await agent.start()
+
+    assert (await agent.on_work_start(30, reason="test"))["status"] == "disabled"
+    await agent.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_eat_finish_uses_recovery_eval_before_fallback(monkeypatch):
     decay = LinearDecay()
     db = FakeDB(PersonaState(satiety=20, last_tick_at=1000.0))

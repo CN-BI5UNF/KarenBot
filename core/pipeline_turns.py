@@ -152,6 +152,18 @@ class PipelineTurnsMixin:
                 conversation_id=record_conversation_id,
             )
 
+        working_check = getattr(self, "_should_buffer_inbound_for_working_persona", None)
+        if working_check is not None and await working_check():
+            await self.history.add_system_note(
+                f"{get_time()} 系统轮跳过：persona_working，当前人格正在工作。",
+                conversation_id=record_conversation_id or "system:global",
+            )
+            logger.info(
+                "人格工作中，跳过 run_one_turn 模型调用 conversation_id=%s phase=%s",
+                conversation_id,
+                task_phase,
+            )
+            return
         if await self._should_buffer_inbound_for_resting_persona():
             await self.history.add_system_note(
                 f"{get_time()} 系统轮跳过：persona_resting，当前人格处于休息状态。",

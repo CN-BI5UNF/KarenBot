@@ -419,6 +419,7 @@ def _format_action_context(state: PersonaState, now: float) -> str:
         "sleeping": "睡眠中",
         "collapsing": "体力崩溃休息中",
         "eating": "进食中",
+        "working": "专注工作中",
     }
     label = label_by_action.get(action, state.current_action)
     parts = [f"- 当前动作: {label}"]
@@ -433,6 +434,10 @@ def _format_action_context(state: PersonaState, now: float) -> str:
         elif action == "eating":
             parts.append(
                 "尚未结束进食，普通入站消息只记录到潜意识缓冲，不应在当前动作结束前回复或表现为已结束"
+            )
+        elif action == "working":
+            parts.append(
+                "正在专注工作，期间的群聊 @ 和私聊会暂存到工作结束；非 @ 群消息只记录"
             )
     elif action_until is not None:
         parts.append("预计结束时间已到，等待睡眠结束/状态结算逻辑处理")

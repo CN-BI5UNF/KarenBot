@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from . import (
+    admin,
     backup,
     chats,
     container,
@@ -41,6 +42,7 @@ from . import (
 # 注册顺序即 OpenAPI 里的分组顺序
 ALL_ROUTERS = [
     system.router,
+    admin.router,
     overview.router,
     chats.router,
     memory.router,

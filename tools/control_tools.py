@@ -1,11 +1,12 @@
-"""控制类工具：no_action / schedule_wakeup。"""
+"""控制类工具：no_action / schedule_wakeup / chat_selection。"""
 
 from __future__ import annotations
 
+import inspect
 import logging
 
 from .base import ToolContext, tool
-from .schemas import NoActionArgs, ScheduleWakeupArgs
+from .schemas import ChatSelectionArgs, NoActionArgs, ScheduleWakeupArgs
 
 logger = logging.getLogger(__name__)
 
@@ -138,3 +139,63 @@ def _build_wakeup_reminder(
         "如果任务需要发送消息，请按 reminder 的任务说明调用发送工具；如果只是内部继续任务且无需通知，可以 no_action。"
     )
     return "\n".join(lines)
+
+
+@tool(
+    name="chat_selection",
+    description=(
+        "临时调整群聊接收范围，只影响群聊，不影响私聊。"
+        "mode=all 恢复正常；mode=pause 暂时不接收普通群消息；"
+        "mode=selected 暂时只接收 group_ids 里的群。"
+        "pause/selected 期间任何群里的 @ 消息仍会推送；到时自动恢复。"
+        "用户要求安静一会、先只盯几个群或恢复群聊时调用。"
+    ),
+    args_model=ChatSelectionArgs,
+    category="control",
+    no_feedback=True,
+)
+async def chat_selection(args: ChatSelectionArgs, ctx: ToolContext) -> dict:
+    if ctx.chat_selection_cb is None:
+        return {
+            "ok": False,
+            "status": "unavailable",
+            "brief": "聊天选择暂不可用：未注入群聊接收控制。",
+            "error": "chat_selection unavailable",
+        }
+    reason = args.reason.strip()
+    if args.mode != "all" and not reason:
+        return {
+            "ok": False,
+            "status": "failed",
+            "brief": "暂停/筛选群聊时请填写 reason。",
+            "error": "reason is required",
+        }
+    try:
+        result = ctx.chat_selection_cb(
+            mode=args.mode,
+            group_ids=list(args.group_ids),
+            duration_minutes=args.duration_minutes,
+            reason=reason,
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except Exception as exc:  # noqa: BLE001 - safe validation message
+        return {
+            "ok": False,
+            "status": "failed",
+            "brief": f"调整群聊接收失败：{exc}",
+            "error": str(exc),
+        }
+    selection = result if isinstance(result, dict) else {"mode": args.mode}
+    if args.mode == "all":
+        brief = "已恢复接收所有群聊消息。"
+    elif args.mode == "pause":
+        brief = "已暂停接收普通群消息；@ 消息仍会推送。"
+    else:
+        brief = "已切换到指定群聊；其他群的普通消息暂停，@ 消息仍会推送。"
+    return {
+        "ok": True,
+        "status": "updated",
+        "brief": brief,
+        "selection": selection,
+    }

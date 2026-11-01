@@ -312,6 +312,64 @@ async def test_resting_inbound_without_subconscious_does_not_call_provider(
 
 @pytest.mark.asyncio
 
+@pytest.mark.asyncio
+async def test_working_caches_private_messages_until_idle(build_pipeline):
+    persona_agent = RecordingPersonaAgent(current_action="working")
+    pipeline, provider, adapter, history, _ = await build_pipeline(
+        [_ai_send_private(target_qq="123", content="工作结束回复")],
+        persona_agent=persona_agent,
+        subconscious_agent=None,
+    )
+
+    await pipeline.enqueue(_msg(user_id="123", text="工作中私聊", message_id="work-1"))
+    await _drain_pipeline(pipeline)
+
+    assert provider.calls == []
+    assert adapter.sent == []
+    assert len(pipeline._work_pending) == 1
+    records = await history.records()
+    assert not any("工作中私聊" in str(record.get("content") or "") for record in records)
+
+    persona_agent.current_action = "awake"
+    await _wait_until(lambda: bool(provider.calls), max_wait=4.0)
+    await _drain_pipeline(pipeline, max_wait=2.0)
+
+    records = await history.records()
+    assert any("工作中私聊" in str(record.get("content") or "") for record in records)
+    assert adapter.sent
+
+
+@pytest.mark.asyncio
+async def test_working_records_plain_group_messages_but_queues_mentions(build_pipeline):
+    persona_agent = RecordingPersonaAgent(current_action="working")
+    pipeline, provider, _, history, _ = await build_pipeline(
+        [_ai_no_action()],
+        persona_agent=persona_agent,
+        subconscious_agent=None,
+    )
+
+    await pipeline.enqueue(
+        _msg(group_id="5555", text="工作中普通群聊", message_id="work-g1")
+    )
+    await pipeline.enqueue(
+        _msg(group_id="5555", text="@我 工作结束后看这个", message_id="work-g2")
+    )
+    await _drain_pipeline(pipeline)
+
+    assert provider.calls == []
+    assert len(pipeline._work_pending) == 1
+    records = await history.records()
+    assert any(
+        "工作中普通群聊" in str(record.get("content") or "")
+        and record.get("metadata", {}).get("suppressed_reason") == "persona_working"
+        for record in records
+    )
+    assert not any(
+        "工作结束后看这个" in str(record.get("content") or "") for record in records
+    )
+
+
+@pytest.mark.asyncio
 async def test_inbound_after_resting_ends_calls_main_provider(build_pipeline):
 
     persona_agent = RecordingPersonaAgent(current_action="eating")

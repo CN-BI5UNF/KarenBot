@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from utils.image_contracts import SUPPORTED_IMAGE_EXTS
@@ -201,14 +202,37 @@ def resolve_emoji_path(emoji_name: str, emoji_dir: Path | None) -> Path:
 def resolve_send_image_ref(
     image_ref: str,
     workspace_dir: Path | None,
+    *,
+    persona_image_store: Any | None = None,
+    persona_name: str = "",
 ) -> tuple[Path | None, str | None, str]:
     """解析 send_* 的 image 字段。
 
-    image 是通用图片发送，不指向 emoji 目录。允许 http(s) URL 或 workspace 内路径。
+    image 是通用图片发送，不指向 emoji 目录。允许 http(s) URL、workspace 内路径，
+    或当前人格的角色形象引用 ``persona-image:<当前人格>[:<image_id>]``。
     """
     value = (image_ref or "").strip()
     if not value:
         raise MessageBuildError("图片引用为空")
+
+    if value.lower().startswith("persona-image:"):
+        from core.persona_image import PersonaImageError, parse_persona_image_ref
+
+        if persona_image_store is None:
+            raise MessageBuildError("角色形象功能未就绪")
+        try:
+            parsed_ref = parse_persona_image_ref(value)
+            if parsed_ref is None:
+                raise PersonaImageError("角色形象引用格式无效")
+            ref_persona, image_id = parsed_ref
+            current = str(persona_name or "").strip()
+            if not current or ref_persona != current:
+                raise PersonaImageError("只能发送当前人格的角色形象")
+            image_path = persona_image_store.resolve(ref_persona, image_id)
+        except (PersonaImageError, OSError) as exc:
+            raise MessageBuildError(str(exc)) from None
+        label = f"[角色形象: {image_id or '预览图'}]"
+        return image_path, None, label
 
     parsed = urlparse(value)
     if parsed.scheme in {"http", "https"} and parsed.netloc:
@@ -238,6 +262,8 @@ def build_message_action(
     workspace_dir: Path | None,
     *,
     face: str | None = None,
+    persona_image_store: Any | None = None,
+    persona_name: str = "",
 ) -> dict:
     """把 content/emoji/image/face 四选一输入拼成发送动作片段。
 
@@ -266,7 +292,12 @@ def build_message_action(
             "label": f"[表情包: {emoji.strip()}]",
         }
     if image and image.strip():
-        image_path, image_url, label = resolve_send_image_ref(image, workspace_dir)
+        image_path, image_url, label = resolve_send_image_ref(
+            image,
+            workspace_dir,
+            persona_image_store=persona_image_store,
+            persona_name=persona_name,
+        )
         return {
             "kind": "image",
             "image_path": str(image_path) if image_path is not None else "",

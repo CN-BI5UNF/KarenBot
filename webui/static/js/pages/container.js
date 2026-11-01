@@ -1,8 +1,9 @@
-// 受控 Docker 容器状态页。配置在 设置 → 容器；本页只做诊断与轻量测试。
+// 受控 Docker 容器状态页。配置在 设置 → 容器；本页做诊断、文件浏览与轻量测试。
 
 import { h, fill, card, empty, table } from '../dom.js';
 import { endpoints } from '../api.js';
 import { promptStorageSetup } from '../container_setup.js';
+import { createContainerFileBrowser } from '../container_files.js';
 
 function formatBytes(value) {
   const num = Math.max(0, Number(value) || 0);
@@ -21,6 +22,7 @@ export async function render(container, ctx) {
   let storageSetup = null;
   let lastError = null;
   let destroyed = false;
+  const fileBrowser = createContainerFileBrowser(ctx);
 
   const refreshButton = h('button', { class: 'btn', onclick: () => refresh() }, '刷新');
   const testButton = h('button', {
@@ -52,8 +54,8 @@ export async function render(container, ctx) {
       h('p', { class: 'page-desc' },
         'Docker 容器只提供资源/文件隔离，不是对抗恶意代码的绝对安全边界。'
         + '默认无网络、无特权、非 root、只挂载专用 workspace。'
-        + '首次使用直接点「一键准备 / 启动」；遇到问题按下方提示修复。')),
-    actionHost, summaryHost, problemHost, detailHost, storageHost);
+        + '首次使用直接点「一键准备 / 启动」；可在下方文件管理中浏览 /workspace。')),
+    actionHost, summaryHost, problemHost, fileBrowser.el, detailHost, storageHost);
   fill(container, page);
 
   async function refresh() {
@@ -150,6 +152,8 @@ export async function render(container, ctx) {
         ? table(['项目', '值'], rows.map(([label, value]) => h('tr', {},
           h('td', {}, label), h('td', {}, String(value)))))
         : empty('暂无存储路径信息')));
+
+    fileBrowser.setRunning(box.state === 'running');
   }
 
   function renderProblems(info, storage, docker, mismatch) {
@@ -262,6 +266,7 @@ export async function render(container, ctx) {
     resetButton.disabled = true;
     try {
       await endpoints.containerReset();
+      fileBrowser.reset();
       ctx.toast('容器已重建', 'ok');
       await refresh();
     } catch (e) {

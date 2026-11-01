@@ -131,6 +131,7 @@ async def test_all_tools_have_clear_results_in_simulated_runtime(tmp_path, monke
         def __init__(self) -> None:
             self.eat_calls: list[tuple[str, int, str]] = []
             self.sleep_calls: list[tuple[int, str]] = []
+            self.work_calls: list[tuple[int, str]] = []
 
         async def on_eat_start(
             self,
@@ -149,6 +150,15 @@ async def test_all_tools_have_clear_results_in_simulated_runtime(tmp_path, monke
         ) -> dict:
             self.sleep_calls.append((duration_minutes, reason))
             return {"status": "started", "record_id": "sleep-runtime"}
+
+        async def on_work_start(
+            self,
+            duration_minutes: int,
+            *,
+            reason: str,
+        ) -> dict:
+            self.work_calls.append((duration_minutes, reason))
+            return {"status": "started", "action_until": 9999.0}
 
     adapter = FullFakeAdapter()
     persona_agent = FakePersonaAgent()
@@ -291,6 +301,8 @@ async def test_all_tools_have_clear_results_in_simulated_runtime(tmp_path, monke
             "description": "豆浆和包子",
         },
         "sleep": {"duration_minutes": 90, "reason": "午休"},
+        "work": {"duration_minutes": 60, "reason": "整理容器资料"},
+        "chat_selection": {"mode": "all"},
         "tool_search": {"tool_name": "upload_file", "intent": "测试工具详情查询"},
         "list_emoji": {},
         "save_emoji_from_url": {
@@ -349,8 +361,10 @@ async def test_all_tools_have_clear_results_in_simulated_runtime(tmp_path, monke
     assert results["get_msg"]["data"]["conversation_id"] == "group:456"
     assert persona_agent.eat_calls == [("早餐", 20, "豆浆和包子")]
     assert persona_agent.sleep_calls == [(90, "午休")]
+    assert persona_agent.work_calls == [(60, "整理容器资料")]
     assert results["eat"]["result"]["record_id"] == "eat-runtime"
     assert results["sleep"]["result"]["record_id"] == "sleep-runtime"
+    assert results["work"]["result"]["action_until"] == 9999.0
 
     assert results["read_file"]["data"]["range"] == "continuous_page"
     assert "old line" in results["read_file"]["content"]

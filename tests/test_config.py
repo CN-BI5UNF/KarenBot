@@ -373,6 +373,7 @@ def test_persona_management_defaults_disabled():
     assert pm.physiology.satiety.decay_per_hour == 1.0
     assert pm.physiology.satiety.recovery_per_minute == 0.5
     assert pm.physiology.satiety.max_eat_minutes == 60
+    assert pm.physiology.work.max_minutes == 240
     assert pm.mood.decay_per_hour == 0.5
     assert pm.mood.social_boost == 3.0
     assert pm.consolidation.daily_fallback_hour == 4

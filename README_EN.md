@@ -24,7 +24,7 @@ The project is named **KarenBot** after **Karen**, Plankton's robot girlfriend i
 - Repository: <https://github.com/CN-BI5UNF/KarenBot>
 - Default branch: `main`
 - In-app update branch: `refactor/main`
-- Status: `0.9.0-alpha` refactor snapshot; interfaces may still change
+- Status: `1.0.0-beta` refactor snapshot; interfaces may still change
 
 > **Upstream and license**: KarenBot is derived from [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent) and its contributors. Original copyright notices are retained. KarenBot is released under **Apache-2.0**. See [NOTICE](NOTICE).
 
@@ -34,12 +34,16 @@ The project is named **KarenBot** after **Karen**, Plankton's robot girlfriend i
 - QQ / NapCat integration (private and group chats, send queue).
 - Long-term memory and archival without rewriting raw history.
 - Multi-turn tool loop: messaging, recall, memory, search, weather, wake-ups, sub-agents.
+- Persona character images: upload a gallery of appearances on the Personas page, choose a preview image, inspect them through a read-only virtual knowledge entry, and send them directly as images. The model has no write/delete path for the gallery.
+- One merged black/white list page controls inbound policy, whitelist IDs, and blacklist IDs; saving applies both immediately and blacklist still wins.
 - WebUI built with FastAPI and dependency-free static assets; model configuration lives in Model Management, and the sidebar collapses to icons.
 - Multi-provider support: OpenAI, Anthropic, DeepSeek, GLM, Qwen, Gemini, OpenRouter, custom compatible endpoints; relays can declare a Gemini/Claude/OpenAI vendor for capability lookup.
 - Native vision paths for images, complete animated GIFs, and complete videos where the selected main model supports them; standalone vision remains available. Videos are sent as managed data URLs without frame extraction; unsupported models receive a workspace placeholder only.
-- On-demand knowledge and group-slang lookup, per-entry sharing, and deduplication.
+- On-demand knowledge and group-slang lookup; knowledge supports per-entry sharing, while slang is shared by every persona in the same group. The slang page supports search; AI applications whose term duplicates an existing group entry are auto-rejected and kept visible instead of overwriting it.
+- **Chat selection**: the model can temporarily pause ordinary group messages or accept only selected groups. @-mentions still arrive, and private chats are never filtered.
+- **Storage & data**: one page for storage inventory/cache cleanup, context budget, previewed persona runtime cleanup, and local source uninstall, with optional external backup and an independent uninstall helper.
 - LLM-managed emoji folder tools plus native QQ face adaptation: inbound faces show Chinese names (e.g. `[流眼泪]` for `[表情5]`) and send tools accept face names.
-- Controlled Docker container: command execution, `/workspace` file tools, import/export; no network/privileges/non-root by default, with memory, CPU, pids, and storage limits. B named-volume soft quota is the default and needs no administrator; C fixed-size storage is an advanced hard limit. It supports Docker registry-mirror prefixes, one-click prepare/start, and background image pulls. First C-mode enable opens a Linux sudo-password dialog (stdin only, never stored) or a Windows UAC prompt. Windows includes a VHDX setup script (see [container docs](docs/container.md)).
+- Controlled Docker container: command execution, `/workspace` file tools, import/export, and a built-in read-only file manager with directory navigation and bounded text previews; no network/privileges/non-root by default, with memory, CPU, pids, and storage limits. B named-volume soft quota is the default and needs no administrator; C fixed-size storage is an advanced hard limit. It supports Docker registry-mirror prefixes, one-click prepare/start, and background image pulls. First C-mode enable opens a Linux sudo-password dialog (stdin only, never stored) or a Windows UAC prompt. Windows includes a VHDX setup script (see [container docs](docs/container.md)).
 - Bounded summaries, CAS commits, media lifecycle, scoped deletion/recovery, transactional config writes.
 - In-app updates from GitHub Releases/tags; source-only updates do not overwrite data.
 
@@ -143,6 +147,7 @@ CI runs Ubuntu/Windows × Python 3.11/3.12.
 - [Features](docs/features.md)
 - [Architecture](docs/architecture.md)
 - [Background running](docs/background_running.md)
+- [Destructive data operations](docs/destructive_admin.md)
 - [Persona writing guide](docs/persona_writing_guide.md)
 - [Provider development](docs/provider_development.md)
 

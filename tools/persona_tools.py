@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .base import ToolContext, tool
-from .schemas import EatArgs, SleepArgs
+from .schemas import EatArgs, SleepArgs, WorkArgs
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,38 @@ async def sleep(args: SleepArgs, ctx: ToolContext) -> dict:
     wrapped = _persona_result(result, default_status="done", default_brief="已记录开始睡眠。")
     wrapped["reason"] = args.reason
     return wrapped
+
+
+@tool(
+    name="work",
+    description=(
+        "进入人格自主「工作」状态，用于准备在容器里专注完成一段较长的任务。"
+        "工作期间群聊 @ 和私聊会暂存，结束后再交给模型处理；到时间会自动退出。"
+        "开始前先告诉用户大概要做什么。"
+    ),
+    args_model=WorkArgs,
+    category="persona",
+    search_tags=["persona", "work", "container", "focus"],
+)
+async def work(args: WorkArgs, ctx: ToolContext) -> dict:
+    handler = _persona_handler(ctx, "on_work_start")
+    if handler is None:
+        return _unavailable("work")
+
+    result = await _call_work_start(handler, args.duration_minutes, args.reason)
+    wrapped = _persona_result(result, default_status="done", default_brief="已进入工作状态。")
+    wrapped["reason"] = args.reason
+    return wrapped
+
+
+async def _call_work_start(
+    handler: Callable[..., Any],
+    duration_minutes: int,
+    reason: str,
+) -> Any:
+    if _accepts_reason(handler):
+        return await _maybe_await(handler(duration_minutes, reason=reason))
+    return await _maybe_await(handler(duration_minutes))
 
 
 def _persona_handler(ctx: ToolContext, name: str) -> Callable[..., Any] | None:

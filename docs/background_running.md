@@ -289,6 +289,20 @@ tar -czf karen-data-$(date +%Y%m%d).tar.gz \
 
 ---
 
+## 6.1 完全卸载
+
+WebUI「存储与数据 → 检查影响并卸载」支持本机完全卸载。它会先显示精确目标、
+保留项和可选备份，然后要求输入 `永久卸载 KarenBot` 并勾选确认。删除由独立
+助手在目标目录之外执行，后端退出后继续；审计结果在
+`~/.local/state/karenbot/uninstall/`。
+
+- 当前自动卸载支持 Linux 非 systemd 托管的后台模式。
+- systemd 用户/系统服务、Windows、macOS 会显示手动步骤，不自动执行。
+- 保留 `~/Debata_BeiFen`、`~/debata-backups` 等开发备份、GitHub 远端、
+  NapCat、Docker 和系统 keyring。
+- 可选备份默认关闭；未勾选时不会保留数据副本。详见
+  [危险数据操作](destructive_admin.md)。
+
 ## 7. 常见问题
 
 ### 服务启动失败 / 203/EXEC

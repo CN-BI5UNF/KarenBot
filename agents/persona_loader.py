@@ -4,6 +4,7 @@
     persona_prompt.py    必填。导出 PERSONA_PROMPT 字符串，可选 PERSONA_VARS dict。
     avatar.png           （可选）头像，UI 展示用
     icon.ico             （可选）
+    appearance/          （可选）角色形象图，WebUI 上传的只读视觉资料
 
 所有人格平级放在 personas/{name}/ 下：
     - 仓库自带的（如 大肥鱼/、deepseek/）随仓库一起发布

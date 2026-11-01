@@ -84,6 +84,59 @@ def test_store_only_injects_active_notes_and_escapes(tmp_path):
     assert store.stats(persona_id="p")["total"] == 2
 
 
+@pytest.mark.asyncio
+async def test_persona_image_is_a_virtual_read_only_knowledge_entry(tmp_path):
+    class FakeImageStore:
+        def list_images(self, persona_id):
+            assert persona_id == "p"
+            return [
+                {
+                    "id": "a_1111111111111111",
+                    "cover": True,
+                    "mime": "image/png",
+                    "persona": "p",
+                    "width": 640,
+                    "height": 480,
+                    "size": 1234,
+                    "sha256": "a" * 64,
+                },
+                {
+                    "id": "a_2222222222222222",
+                    "cover": False,
+                    "mime": "image/jpeg",
+                    "persona": "p",
+                    "width": 300,
+                    "height": 400,
+                    "size": 456,
+                    "sha256": "b" * 64,
+                },
+            ]
+
+    service, _provider = _service(tmp_path, [])
+    service.persona_image_store = FakeImageStore()
+
+    result = service.lookup(query="角色形象")
+
+    assert result["ok"] is True
+    assert result["total"] == 1
+    entry = result["entries"][0]
+    assert entry["title"] == "角色形象"
+    assert entry["read_only"] is True
+    assert entry["virtual"] is True
+    assert entry["image_ref"] == "persona-image:p:a_1111111111111111"
+    assert len(entry["image_refs"]) == 2
+    assert entry["image_refs"][1] == "persona-image:p:a_2222222222222222"
+    assert entry["images"][0]["cover"] is True
+    assert "describe_image" in entry["content"]
+    assert "send_*" in entry["content"]
+    assert "640×480" in entry["content"]
+
+    # The image entry is not persisted, so an LLM delete cannot remove it.
+    with pytest.raises(KeyError):
+        service.delete_entry("persona-image:p")
+    assert service.lookup(query="角色形象")["total"] == 1
+
+
 def test_cross_kind_near_duplicate_is_not_written(tmp_path):
     store = KnowledgeStore(tmp_path / "knowledge.json")
     store.add_manual(

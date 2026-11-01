@@ -4,7 +4,9 @@
     - ``needs_restart=False`` 的字段：热更新内存配置 + 立即落盘
     - ``needs_restart=True``  的字段：落盘后由前端提示「需重启 Runtime」
 
-黑名单额外做了一次热应用（``pipeline.apply_blacklist``），保存即生效、无需重启。
+黑名单/白名单额外的热应用（``pipeline.apply_blacklist`` /
+``pipeline.apply_whitelist``）保存即生效、无需重启；两者统一走
+``GET/PUT /api/settings/lists``，「设置 → 渠道」不再重复展示白名单字段。
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from app_config import user_error_text
+from app_config.schema import BlacklistConfig, WhitelistConfig
 from webui.config_edit import apply_validated, validate_config
 from webui.settings_spec import SETTINGS_GROUPS, field_map
 
@@ -491,6 +494,8 @@ async def _apply_hot(rt: Any, path: str, value: Any) -> None:
             logger.debug("热更新日志级别失败", exc_info=True)
     elif path.startswith("adapters.") and ".blacklist" in path:
         _apply_blacklist_hot(rt)
+    elif path.startswith("adapters.") and ".whitelist" in path:
+        _apply_whitelist_hot(rt)
 
 
 def _apply_blacklist_hot(rt: Any) -> None:
@@ -505,6 +510,20 @@ def _apply_blacklist_hot(rt: Any) -> None:
         pipeline.apply_blacklist(adapter_cfg.blacklist)
     except Exception:  # noqa: BLE001
         logger.exception("热应用黑名单失败")
+
+
+def _apply_whitelist_hot(rt: Any) -> None:
+    pipeline = getattr(rt, "pipeline", None)
+    if pipeline is None or not hasattr(pipeline, "apply_whitelist"):
+        return
+    try:
+        adapter_cfg = next(iter(rt.config.adapters.values()))
+    except StopIteration:
+        return
+    try:
+        pipeline.apply_whitelist(adapter_cfg.whitelist)
+    except Exception:  # noqa: BLE001
+        logger.exception("热应用白名单失败")
 
 
 # ============================================================
@@ -686,6 +705,109 @@ def _blacklist_json(cfg: Any) -> dict[str, Any]:
         "enabled": bool(cfg.enabled),
         "qq_ids": list(cfg.qq_ids),
         "group_ids": list(cfg.group_ids),
+    }
+
+
+def _adapter_cfg(rt: Any) -> Any:
+    adapters = rt.config.adapters or {}
+    if not adapters:
+        raise HTTPException(status_code=404, detail="配置里没有任何渠道适配器")
+    return next(iter(adapters.values()))
+
+
+def _positive_ids(values: list[int]) -> list[int]:
+    return sorted({int(value) for value in values if int(value) > 0})
+
+
+class WhitelistPayload(BaseModel):
+    mode: Literal["open", "verify", "whitelist"] = "verify"
+    qq_ids: list[int] = Field(default_factory=list)
+    group_ids: list[int] = Field(default_factory=list)
+
+
+class ListsPayload(BaseModel):
+    whitelist: WhitelistPayload
+    blacklist: BlacklistPayload
+
+
+def _whitelist_json(cfg: Any, pipeline: Any) -> dict[str, Any]:
+    return {
+        "mode": str(cfg.mode),
+        "qq_ids": list(cfg.qq_ids),
+        "group_ids": list(cfg.group_ids),
+        "active_qq_ids": sorted(
+            getattr(pipeline, "_whitelist_qq_ids", set()) or set()
+        ),
+        "active_group_ids": sorted(
+            getattr(pipeline, "_whitelist_group_ids", set()) or set()
+        ),
+    }
+
+
+def _lists_json(rt: Any) -> dict[str, Any]:
+    pipeline = getattr(rt, "pipeline", None)
+    adapter_cfg = _adapter_cfg(rt)
+    return {
+        "whitelist": _whitelist_json(adapter_cfg.whitelist, pipeline),
+        "blacklist": {
+            **_blacklist_json(adapter_cfg.blacklist),
+            "active_qq_ids": sorted(
+                getattr(pipeline, "_blacklist_qq_ids", set()) or set()
+            ),
+            "active_group_ids": sorted(
+                getattr(pipeline, "_blacklist_group_ids", set()) or set()
+            ),
+        },
+    }
+
+
+@router.get("/lists")
+async def get_lists(request: Request) -> dict[str, Any]:
+    """Unified access-list view for the merged WebUI page."""
+    rt = require_runtime(request)
+    return {"ok": True, "hot_applied": True, **_lists_json(rt)}
+
+
+@router.put("/lists")
+async def put_lists(
+    request: Request,
+    payload: Annotated[ListsPayload, Body()],
+) -> dict[str, Any]:
+    """Replace both lists and apply them without restarting Runtime."""
+    rt = require_runtime(request)
+    host = request.app.state.host
+    adapter_cfg = _adapter_cfg(rt)
+    whitelist = WhitelistConfig(
+        mode=payload.whitelist.mode,
+        qq_ids=_positive_ids(payload.whitelist.qq_ids),
+        group_ids=_positive_ids(payload.whitelist.group_ids),
+    )
+    blacklist = BlacklistConfig(
+        enabled=payload.blacklist.enabled,
+        qq_ids=_positive_ids(payload.blacklist.qq_ids),
+        group_ids=_positive_ids(payload.blacklist.group_ids),
+    )
+    adapter_cfg.whitelist = whitelist
+    adapter_cfg.blacklist = blacklist
+    await asyncio.to_thread(host.save_config)
+    _apply_whitelist_hot(rt)
+    _apply_blacklist_hot(rt)
+    logger.info(
+        "黑白名单已更新 whitelist.mode=%s qq=%s group=%s；"
+        "blacklist.enabled=%s qq=%s group=%s",
+        whitelist.mode,
+        whitelist.qq_ids,
+        whitelist.group_ids,
+        blacklist.enabled,
+        blacklist.qq_ids,
+        blacklist.group_ids,
+    )
+    return {
+        "ok": True,
+        "needs_restart": False,
+        "hot_applied": True,
+        "message": "黑白名单已保存并立即生效",
+        **_lists_json(rt),
     }
 
 

@@ -32,6 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.persona_image import format_persona_image_ref
 from utils.json_extract import extract_json_array, extract_json_object
 
 logger = logging.getLogger(__name__)
@@ -691,6 +692,38 @@ class KnowledgeStore:
             self._save_locked()
             return True
 
+    def delete_private_persona_entries(self, persona_id: str) -> int:
+        """Remove only ``shared=false`` entries owned by one persona.
+
+        Shared entries are deliberately kept: other personas may still reference
+        them, and the group slang store is a separate shared namespace.
+        """
+        target = str(persona_id or "").strip()
+        if not target:
+            raise ValueError("persona_id 不能为空")
+        with self._lock:
+            original = self._entries
+            kept = [
+                item
+                for item in original
+                if not (
+                    item.get("persona_id") == target
+                    and not bool(item.get("shared"))
+                )
+            ]
+            removed = len(original) - len(kept)
+            if not removed:
+                return 0
+            if not self.writable:
+                raise RuntimeError("知识库不可写（上次读取失败，已进入只读模式）")
+            self._entries = kept
+            try:
+                self._save_locked()
+            except Exception:
+                self._entries = original
+                raise
+            return removed
+
     def dedupe(
         self,
         *,
@@ -888,12 +921,14 @@ class KnowledgeService:
         web_search: Any = None,
         provider_resolver: Callable[[], tuple[Any, Any]],
         usage_recorder: Callable[..., Any] | None = None,
+        persona_image_store: Any = None,
     ) -> None:
         self.persona_id = persona_id
         self.config = config
         self.web_search = web_search
         self.provider_resolver = provider_resolver
         self.usage_recorder = usage_recorder
+        self.persona_image_store = persona_image_store
         self.store = KnowledgeStore(Path(data_dir) / "knowledge.json")
         self.state_path = Path(data_dir) / "knowledge_state.json"
         self._research_lock: asyncio.Lock | None = None
@@ -906,6 +941,85 @@ class KnowledgeService:
         if self._research_lock is None:
             self._research_lock = asyncio.Lock()
         return self._research_lock
+
+    def _persona_image_entry(self) -> dict[str, Any] | None:
+        """Build a virtual, read-only knowledge entry for the active image.
+
+        It is deliberately not persisted in ``knowledge.json``: the LLM must
+        never be able to delete or rewrite the record, while ``list_knowledge_notes``
+        can still surface the image reference for ``describe_image``.
+        """
+        store = self.persona_image_store
+        if store is None:
+            return None
+        try:
+            images = store.list_images(self.persona_id)
+        except Exception:  # noqa: BLE001 - a broken image must not break knowledge
+            logger.warning("读取角色形象知识失败", exc_info=True)
+            return None
+        if not images:
+            return None
+        name = str(self.persona_id)
+        cover = next((item for item in images if item.get("cover")), images[0])
+        entries: list[dict[str, Any]] = []
+        lines: list[str] = []
+        for image in images:
+            ref = format_persona_image_ref(name, str(image.get("id") or ""))
+            dimensions = ""
+            if image.get("width") and image.get("height"):
+                dimensions = f"，{int(image['width'])}×{int(image['height'])}"
+            marker = "（预览图）" if image.get("id") == cover.get("id") else ""
+            lines.append(f"- {ref}{marker}{dimensions}")
+            entries.append(
+                {
+                    "id": image.get("id"),
+                    "ref": ref,
+                    "cover": bool(image.get("cover")),
+                    "width": int(image.get("width") or 0),
+                    "height": int(image.get("height") or 0),
+                    "mime": image.get("mime") or "",
+                }
+            )
+        cover_ref = format_persona_image_ref(name, str(cover.get("id") or ""))
+        content = (
+            f"当前人格共有 {len(images)} 张角色形象，预览图是 {cover_ref}。\n"
+            f"可用引用：\n" + "\n".join(lines) + "\n"
+            "这是只读资料。查看画面时调用 describe_image，image_url 填上面的引用；"
+            "被要求发图/自拍时，把同一引用填到 send_* 工具的 image 字段即可发送。"
+            "不要编造未列出的外貌细节。"
+        )
+        return {
+            "id": f"persona-image:{name}",
+            "persona_id": name,
+            "kind": "note",
+            "title": "角色形象",
+            "content": content,
+            "usage": "被问到自己长什么样、发张自拍、确认角色外观时使用；可用 describe_image 查看，也可用 send_* 的 image 字段发送。",
+            "tags": ["角色形象", "外貌", "长相", "自拍", "发送图片", "只读", "image"],
+            "sources": [],
+            "status": "active",
+            "shared": False,
+            "source": "system",
+            "confidence": 1.0,
+            "read_only": True,
+            "virtual": True,
+            "image_ref": cover_ref,
+            "image_refs": [item["ref"] for item in entries],
+            "images": entries,
+        }
+
+    @staticmethod
+    def _virtual_matches(
+        entry: dict[str, Any], *, query: str, kind: str
+    ) -> bool:
+        if kind and entry.get("kind") != kind:
+            return False
+        needle = str(query or "").strip().casefold()
+        if not needle:
+            return True
+        haystacks = [entry.get("title"), entry.get("content"), entry.get("usage")]
+        haystacks.extend(entry.get("tags") or [])
+        return any(needle in str(value or "").casefold() for value in haystacks)
 
     # ------------------------------------------------------------------
     # Prompt / admin surface
@@ -933,6 +1047,11 @@ class KnowledgeService:
             status="active",
             limit=2000,
         )
+        virtual = self._persona_image_entry()
+        if virtual is not None and self._virtual_matches(
+            virtual, query=query, kind=kind
+        ):
+            matches = [virtual, *matches]
         entries: list[dict[str, Any]] = []
         used = 0
         for item in matches:
@@ -965,6 +1084,17 @@ class KnowledgeService:
                     "sources": sources,
                     "confidence": item.get("confidence"),
                     "shared": bool(item.get("shared")),
+                    **(
+                        {
+                            "read_only": True,
+                            "virtual": True,
+                            "image_ref": item.get("image_ref"),
+                            "image_refs": list(item.get("image_refs") or []),
+                            "images": list(item.get("images") or []),
+                        }
+                        if item.get("image_ref")
+                        else {}
+                    ),
                 }
             )
             used += size
@@ -1026,6 +1156,15 @@ class KnowledgeService:
     def stats(self) -> dict[str, Any]:
         return self.store.stats(persona_id=self.persona_id, include_shared=True)
 
+    def persona_image_info(self) -> dict[str, Any] | None:
+        store = self.persona_image_store
+        if store is None:
+            return None
+        try:
+            return store.get(self.persona_id)
+        except Exception:  # noqa: BLE001 - metadata is optional UI information
+            return None
+
     def get_entry(self, entry_id: str) -> dict[str, Any] | None:
         return self.store.get_entry(entry_id)
 
@@ -1052,6 +1191,9 @@ class KnowledgeService:
     def delete_entry(self, entry_id: str) -> bool:
         self._owned_entry(entry_id)
         return self.store.delete_entry(entry_id)
+
+    def delete_private_persona_entries(self, persona_id: str) -> int:
+        return self.store.delete_private_persona_entries(persona_id)
 
     def dedupe(
         self,

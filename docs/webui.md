@@ -45,7 +45,7 @@ WebUI 能读到全部聊天记录、改配置、换 API Key，所以**默认必�
 
 ## 页面结构
 
-侧边栏顺序与原桌面仪表盘一致，末尾追加了 WebUI 新增的「黑名单」：
+侧边栏顺序与原桌面仪表盘一致，末尾追加了 WebUI 新增的「黑白名单」：
 
 | 页面 | 对应后端 | 原 GUI 来源 |
 |---|---|---|
@@ -58,8 +58,8 @@ WebUI 能读到全部聊天记录、改配置、换 API Key，所以**默认必�
 | 模型管理 | `webui/api/models.py` | `ui/dashboard/models_page.py` |
 | **表情包** | `webui/api/emoji.py` | `ui/dashboard/emoji_section.py`（WebUI 独立成页） |
 | **容器** | `webui/api/container.py` | 无（WebUI 新增；见 `docs/container.md`） |
-| **存储与缓存** | `webui/api/storage.py` | 无（WebUI 新增；见 `docs/storage_maintenance.md`） |
-| **黑名单** | `webui/api/settings.py` | 无（WebUI 新增） |
+| **存储与数据** | `webui/api/storage.py` + `webui/api/admin.py` | 无（WebUI 新增；缓存清理见 `docs/storage_maintenance.md`，危险操作见 `docs/destructive_admin.md`） |
+| **黑白名单** | `webui/api/settings.py` | 无（WebUI 新增；白名单与黑名单合并） |
 | 设置 | `webui/api/settings.py` | `ui/dashboard/settings_page.py` |
 
 > 「模型管理」同时管**云端 LLM 提供商/Agent 模型**和**本地插件模型**（TTS / 本地
@@ -206,6 +206,25 @@ runtime 事件折叠。前端只按 `kind` 渲染，不猜记录之间的关系�
 
 `limit` 的档位是 300（`DEFAULT_VISIBLE_RECORD_LIMIT`），「加载更早」每次加 300。
 
+## 存储与数据
+
+「存储与数据」页合并了原来的「存储与缓存」和「数据管理」：上半部分盘点存储、
+清理可重建缓存并展示上下文预算，下半部分提供人格运行数据清理、本地完全卸载和
+管理任务。危险操作走 `webui/api/admin.py`，使用预览 → 确认 → 后台任务，不在
+前端直接拼删除路径。
+
+| 接口 | 说明 |
+|---|---|
+| `POST /api/admin/personas/{name}/cleanup/preview` | 统计要删除的 memory/vector/私有知识；返回一次性确认令牌和短语 |
+| `POST /api/admin/personas/{name}/cleanup/execute` | 创建清理任务；需要 token、generation、短语、勾选和幂等键 |
+| `POST /api/admin/uninstall/preview` | 列出源码/数据/程序备份等精确目标，以及保留项 |
+| `POST /api/admin/uninstall/execute` | 可选备份后调度独立卸载助手，后端退出 |
+| `GET /api/admin/jobs` / `GET /api/admin/jobs/{id}` | 任务状态（Runtime 停止时仍可用） |
+| `POST /api/admin/jobs/{id}/cancel` | 删除开始前取消 |
+
+这些接口要求登录，并额外要求 `X-Karen-Admin: 1` 和同源请求。详见
+[危险数据操作](destructive_admin.md)。
+
 ## 人格生成
 
 `webui/api/personas.py` + `webui/persona_admin.py`，底层是
@@ -222,7 +241,21 @@ runtime 事件折叠。前端只按 `kind` 渲染，不猜记录之间的关系�
 | `POST /api/personas` | 落盘。覆盖已有时**先自动备份**到 `.backups/` |
 | `GET /api/personas/{name}/source` | 取出 `PERSONA_PROMPT` 字面量，作为改写底稿 |
 | `POST /api/personas/{name}/duplicate` | 复制人格（不带对方的备份） |
+| `GET`/`POST/DELETE /api/personas/{name}/appearance` | 查询图库、添加图片、删除整个图库 |
+| `POST /api/personas/{name}/appearance/{image_id}/cover` | 设置列表预览图 |
+| `DELETE /api/personas/{name}/appearance/{image_id}` | 删除单张形象 |
+| `GET /api/personas/{name}/appearance/file?image_id=` | 鉴权后读取指定形象（缺省为预览图） |
 | `GET`/`DELETE /api/personas/brief` | 向导暂存的人格描述 |
+
+角色形象图库保存在 `personas/<name>/appearance/`，由 `manifest.json` 记录预览图
+和图片列表；旧版单图 `image.*` 仍可读取。上传会逐张校验格式/尺寸并缩放到最长边
+2048，可多选上传、逐张删除或指定预览图。模型通过 `list_knowledge_notes` 看到
+只读虚拟条目，再用 `describe_image` 查看 `persona-image:<当前人格>:<图片ID>`，
+也可把同一引用填进发送工具的 `image` 字段直接发图。独立视觉关闭但主模型原生图片
+输入可用时，会复用主聊天模型。LLM 没有写接口。
+
+设置 →「人格与生理」里的「单次工作上限」控制模型自主 `work` 状态的最长时间（分钟，0 为禁用）。
+工作期间群聊 @ 和私聊会暂存，退出后统一交给模型；普通群消息只记录。
 
 三条设计约束：
 
@@ -301,9 +334,9 @@ https 输入。更新器只接受同一 `CN-BI5UNF/KarenBot` 仓库，拒绝 htt
 它被写进 `<数据目录>/persona_brief.json`，配置完成后「人格 → 新建人格」会读它预填，
 用过即删。
 
-## 黑名单
+## 黑白名单
 
-WebUI 新增功能，与白名单的分工：
+白名单和黑名单合并在左侧「黑白名单」页，保存一次同时更新两侧：
 
 - **白名单**决定「谁能用」，是整体开放策略（`open` / `verify` / `whitelist`）
 - **黑名单**决定「谁永远不能用」，点名拉黑，不影响其它人
@@ -312,34 +345,24 @@ WebUI 新增功能，与白名单的分工：
 不回复、不入库、不消耗 API 费用。**优先级高于白名单与管理员审核**——即使白名单是
 `open`（对所有人开放），黑名单里的对象依然拦得住。
 
-保存后调用 `MessagePipeline.apply_blacklist()` 热更新，**不需要重启 Runtime**（白名单改完
-需要重启）。字段定义见 `app_config/schema.py:BlacklistConfig`，行为测试见
-`tests/test_blacklist_gate.py`。
+保存后调用 `MessagePipeline.apply_whitelist()` 和 `apply_blacklist()` 热更新，
+**不需要重启 Runtime**。字段定义见 `app_config/schema.py:WhitelistConfig` /
+`BlacklistConfig`，行为测试见 `tests/test_blacklist_gate.py`。
 
 ### 名单填写格式（分隔符）
 
-**中英文逗号都能用**，任何入口都不必特意换成英文逗号。但各入口的解析是各写各的
-（项目里没有统一的归一化函数），对其它分隔符的宽容度并不一致：
+页面统一接受中英文逗号、空格、换行、顿号和分号。配置层不解析字符串：
+`WhitelistConfig` / `BlacklistConfig` 的 `qq_ids` / `group_ids` 都是 `list[int]`
+（`app_config/schema.py`），字符串切分全部发生在 WebUI 上游。所以手写
+`config.yaml` 必须写成 YAML 列表：
 
-| 入口 | 解析代码 | `,` | `，` | 空格 / 换行 | `、` | `;` `；` |
-|---|---|:-:|:-:|:-:|:-:|:-:|
-| 黑名单页面 | `webui/static/js/pages/blacklist.js` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 设置页白名单 | `webui/api/settings.py` 的 `list_int` | ✅ | ✅ | ❌ | ❌ | ❌ |
-| 首次配置向导白名单 | `webui/runtime_host.py` 的 `_int_list` | ✅ | ✅ | ✅ | ✅ | ❌ |
-| 通用字符串列表 | `webui/api/settings.py` 的 `list_str` | ✅ | ✅ | 仅换行 | ❌ | ❌ |
-
-两个容易踩的点：
-
-- **设置页白名单最严格。** 粘贴 `111、222` 或 `111 222` 会走到 `int()` 抛错，
-  返回 `400 设置值不合法`——是明确报错，不会静默错配成别的号码。
-- **配置层不解析字符串。** `WhitelistConfig` / `BlacklistConfig` 的 `qq_ids` /
-  `group_ids` 都是 `list[int]`（`app_config/schema.py`），字符串切分全部发生在
-  WebUI 上游。所以手写 `config.yaml` 必须写成 YAML 列表：
-
-  ```yaml
-  whitelist:
-    qq_ids: [111, 222]
-  ```
+```yaml
+whitelist:
+  qq_ids: [111, 222]
+blacklist:
+  enabled: true
+  group_ids: [333]
+```
 
   写成 `qq_ids: "111,222"` 会直接校验失败。
 

@@ -138,6 +138,8 @@ async def research_web_to_prompt(args: ResearchWebToPromptArgs, ctx: ToolContext
         "按需查询知识库中的网络热梗/事实笔记；不会自动注入上下文。"
         "回答近期热梗、新闻背景、版本信息且自己不确定时先查询。"
         "可按标题、内容、标签过滤；返回 id、释义、用法和来源。"
+        "如果结果里有 read_only=true 的角色形象条目，可把它的 image_ref "
+        "直接传给 describe_image 查看画面；该条目不能修改或删除。"
     ),
     args_model=ListKnowledgeArgs,
     category="knowledge",

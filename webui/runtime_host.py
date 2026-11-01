@@ -51,6 +51,10 @@ class RuntimeHost:
         # 启动过程中产生的非致命问题（密钥缺失、feature 加载失败等）
         self.warnings: list[str] = []
         self._stop_requested = False
+        # 危险数据操作期间挡住其它启动/重启入口，避免删除时 Runtime
+        # 被另一个请求拉起来并重新打开 SQLite。
+        self._admin_operation: str | None = None
+        self._admin_was_running = False
 
     # ============================================================
     # 路径 / 配置
@@ -110,9 +114,46 @@ class RuntimeHost:
     # 生命周期
     # ============================================================
 
-    async def start(self) -> bool:
+    def admin_operation_active(self) -> bool:
+        return self._admin_operation is not None
+
+    def begin_admin_operation(self, operation: str) -> None:
+        if self._admin_operation is not None:
+            raise RuntimeError(f"已有危险操作正在进行：{self._admin_operation}")
+        self._admin_operation = str(operation)
+
+    async def pause_for_admin(self, operation: str) -> bool:
+        """暂停 Runtime 并为危险操作加锁；返回操作前是否在运行。"""
+        async with self._restart_lock:
+            self.begin_admin_operation(operation)
+            was_running = self.state == STATE_RUNNING and self.rt is not None
+            self._admin_was_running = was_running
+            if was_running:
+                await self.stop()
+            return was_running
+
+    async def resume_after_admin(self) -> bool:
+        """危险操作结束后按原状态恢复 Runtime，并清除管理锁。"""
+        async with self._restart_lock:
+            try:
+                if not self._admin_was_running:
+                    return False
+                return await self.start(bypass_admin_guard=True)
+            finally:
+                self._admin_was_running = False
+                self._admin_operation = None
+
+    def end_admin_operation(self) -> None:
+        self._admin_was_running = False
+        self._admin_operation = None
+
+    async def start(self, *, bypass_admin_guard: bool = False) -> bool:
         """启动 Runtime。返回是否成功（失败时 ``state=error``，不抛异常）。"""
         async with self._lock:
+            if self._admin_operation is not None and not bypass_admin_guard:
+                self.last_error = f"危险操作进行中：{self._admin_operation}"
+                logger.warning("Runtime 启动被管理锁阻止：%s", self.last_error)
+                return False
             if self.state == STATE_RUNNING:
                 return True
             self._stop_requested = False
@@ -186,6 +227,10 @@ class RuntimeHost:
     async def restart(self) -> bool:
         """原地重启（改完需要重启的配置后调用）。"""
         async with self._restart_lock:
+            if self._admin_operation is not None:
+                self.last_error = f"危险操作进行中：{self._admin_operation}"
+                logger.warning("Runtime 重启被管理锁阻止：%s", self.last_error)
+                return False
             logger.info("正在重启 Runtime ...")
             await self.stop()
             return await self.start()

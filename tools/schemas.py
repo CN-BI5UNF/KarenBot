@@ -47,7 +47,7 @@ class PrivateMessageTarget(_ToolArgs):
     )
     image: str | None = Field(
         default=None,
-        description="图片 URL 或 workspace 路径；不是表情包。",
+        description="图片 URL、workspace 路径，或当前人格角色形象引用 persona-image:<当前人格>[:<image_id>]；不是表情包。",
     )
     face: str | None = Field(
         default=None,
@@ -153,7 +153,7 @@ class GroupMessageTarget(_ToolArgs):
     )
     image: str | None = Field(
         default=None,
-        description="图片 URL 或 workspace 路径；不是表情包。",
+        description="图片 URL、workspace 路径，或当前人格角色形象引用 persona-image:<当前人格>[:<image_id>]；不是表情包。",
     )
     face: str | None = Field(
         default=None,
@@ -939,6 +939,33 @@ class NoActionArgs(_ToolArgs):
     # 空模型即可——LLM 知道不传参数
 
 
+class ChatSelectionArgs(_ToolArgs):
+    """chat_selection 工具参数。"""
+
+    mode: Literal["all", "pause", "selected"] = Field(
+        ...,
+        description=(
+            "群聊接收模式：all=恢复正常接收；pause=暂时不接收普通群消息；"
+            "selected=暂时只接收 group_ids 里的群。所有模式下 @ 消息仍会推送。"
+        ),
+    )
+    group_ids: list[int] = Field(
+        default_factory=list,
+        description="mode=selected 时要接收的群号列表；pause/all 可留空。",
+    )
+    duration_minutes: int = Field(
+        default=60,
+        ge=1,
+        le=1440,
+        description="暂停/筛选持续分钟数，1-1440，到时自动恢复；mode=all 忽略。",
+    )
+    reason: str = Field(
+        default="",
+        max_length=300,
+        description="为什么暂时调整群聊接收范围；会记录在运行状态中。",
+    )
+
+
 class ScheduleWakeupArgs(_ToolArgs):
     """schedule_wakeup 工具参数。"""
 
@@ -1005,9 +1032,11 @@ class DescribeImageArgs(_ToolArgs):
         ...,
         min_length=1,
         description=(
-            "图片 URL 或 workspace 中已存在的图片路径。从用户消息的 [图片 url=...]、"
+            "图片 URL、workspace 中已存在的图片路径，或知识库里的 "
+            "persona-image:<当前人格> 引用。从用户消息的 [图片 url=...]、"
             "[图片 workspace=...] 标记中获取；收到图片时先用此工具理解内容。"
-            "不要根据 msg_id 猜 incoming/img_*.jpg；只能使用消息里实际出现的 workspace 路径或 URL。"
+            "角色形象知识条目会给出 persona-image 引用，只能访问当前人格。"
+            "不要根据 msg_id 猜 incoming/img_*.jpg；只能使用实际存在的引用。"
         ),
     )
     prompt: str | None = Field(
@@ -1395,6 +1424,13 @@ class SleepArgs(_ToolArgs):
 
     duration_minutes: int = Field(..., ge=1, le=720, description="睡眠或休息分钟数，1-720")
     reason: str = Field(..., min_length=1, description="睡眠或休息原因")
+
+
+class WorkArgs(_ToolArgs):
+    """work 工具参数。"""
+
+    duration_minutes: int = Field(..., ge=1, le=720, description="预计工作分钟数，1-720；会被用户设置的上限截断")
+    reason: str = Field(..., min_length=1, description="要专注完成的工作内容")
 
 
 class ContainerArgs(_ToolArgs):

@@ -16,7 +16,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_REST_ACTIONS = {"eating", "sleeping", "collapsing"}
+_REST_ACTIONS = {"eating", "sleeping", "collapsing", "working"}
 _MISSING = object()
 
 

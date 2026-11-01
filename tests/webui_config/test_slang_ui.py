@@ -18,7 +18,10 @@ def test_slang_nav_and_page_contract():
     assert "从当前缓存学习" in page
     assert "保存并确认" in page
     assert "只有已确认词条能被模型按需查询" in page
+    assert "同群所有人格共享" in page
     assert "查看依据" in page
+    assert "搜索词条、释义、用法、示例" in page
+    assert "rejection_reason" in page
     assert "slangList" in api and "slangLearn" in api
     assert "api.del(`/api/slang/" in api
 

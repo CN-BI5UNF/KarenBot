@@ -518,6 +518,16 @@ label.field > .field-label {
 .table th { color: var(--text-secondary); font-weight: 500; font-size: 12px; }
 .table tbody tr:hover { background: var(--bg-hover); }
 
+.persona-thumb {
+  width: 38px; height: 38px; flex: 0 0 38px;
+  border: 1px solid var(--border); border-radius: 8px;
+  object-fit: cover; background: var(--bg-hover);
+}
+.persona-thumb-empty {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-disabled);
+}
+
 /* 指南 §八：空状态给一句静的话——图标 + 标题 + 副标题三层，整体略上移
  * （原 GUI 用 padding-bottom: 35% 把内容提到视觉中心偏上）。
  * empty(title) 单参用法仍渲染一行，保持 dom.js 的向后兼容。 */

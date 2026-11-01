@@ -20,6 +20,9 @@ def _text_mentions_self_or_role(text: str, self_id: str, role_name: str) -> bool
         )
         if any(token in content for token in tokens):
             return True
+    # parse_raw_cq 会把 @ 自己统一改写成 @我；工作状态的 @ 检测必须识别它。
+    if "@我" in content:
+        return True
     cleaned_role = str(role_name or "").strip()
     return bool(cleaned_role and f"@{cleaned_role}" in content)
 

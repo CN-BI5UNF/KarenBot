@@ -1164,6 +1164,13 @@ class PersonaManagementSatietyConfig(StrictModel):
     """单次进食最长时长（分钟）。"""
 
 
+class PersonaManagementWorkConfig(StrictModel):
+    """「工作」状态配置。"""
+
+    max_minutes: int = Field(default=240, ge=0)
+    """模型单次自主工作的最长时长（分钟）；0 表示禁止进入工作状态。"""
+
+
 class PersonaManagementMoodConfig(StrictModel):
     """心情状态配置。"""
 
@@ -1189,6 +1196,9 @@ class PersonaManagementPhysiologyConfig(StrictModel):
 
     satiety: PersonaManagementSatietyConfig = Field(default_factory=PersonaManagementSatietyConfig)
     """饱腹状态。"""
+
+    work: PersonaManagementWorkConfig = Field(default_factory=PersonaManagementWorkConfig)
+    """模型自主工作状态。"""
 
 
 class AgeBracketConfig(StrictModel):

@@ -1,10 +1,11 @@
-// 存储与缓存 —— 盘点、预览、执行与任务结果。
+// 存储与数据 —— 存储盘点、安全清理、上下文预算、危险数据操作与任务结果。
 //
-// 后端只允许清理可重建缓存和受管临时文件；原始聊天、唯一图片、
+// 缓存清理只允许可重建缓存和受管临时文件；原始聊天、唯一图片、
 // workspace 用户文件、长期记忆与备份不会出现在可勾选列表里。
 
 import { h, fill, card, empty, table, modal, formatNumber } from '../dom.js';
 import { endpoints } from '../api.js';
+import { openUninstall } from '../destructive_admin.js';
 
 function formatBytes(value) {
   const num = Math.max(0, Number(value) || 0);
@@ -20,11 +21,14 @@ function stateLabel(state) {
     queued: '排队中',
     running: '执行中',
     cancelling: '取消中',
+    scheduled: '已调度',
     completed: '已完成',
     partial_success: '部分成功',
     failed: '失败',
     cancelled: '已取消',
     interrupted: '已中断',
+    partial: '部分完成',
+    scheduled: '已调度',
   }[state] || state || '未知';
 }
 
@@ -52,24 +56,27 @@ export async function render(container, ctx) {
   let usage = null;
   let contextStatus = null;
   let jobs = [];
+  let adminJobs = [];
   let selected = new Set();
   let polling = null;
   let destroyed = false;
 
   const head = h('div', { class: 'page-head' },
-    h('h1', { class: 'page-title' }, '存储与缓存'),
+    h('h1', { class: 'page-title' }, '存储与数据'),
     h('p', { class: 'page-desc' },
-      '只清理可重建缓存、受管临时文件和超过保留期的入站图片/视频；'
-      + '原始聊天、用户文件与备份受保护。'),
+      '查看存储占用、清理可重建缓存、检查上下文预算，以及预览并执行'
+      + '人格运行数据清理和本地完全卸载。原始聊天、用户文件与备份受保护。'),
   );
   const summaryHost = h('div', { class: 'grid grid-4' });
   const warningHost = h('div', {});
   const usageHost = h('div', {});
   const cleanupHost = h('div', {});
   const contextHost = h('div', {});
+  const adminHost = h('div', {});
   const jobsHost = h('div', {});
   const page = h('div', { class: 'page' },
-    head, warningHost, summaryHost, usageHost, cleanupHost, contextHost, jobsHost,
+    head, warningHost, summaryHost, usageHost, cleanupHost, contextHost,
+    adminHost, jobsHost,
   );
   fill(container, page);
 
@@ -81,14 +88,16 @@ export async function render(container, ctx) {
   async function refresh() {
     refreshButton.disabled = true;
     try {
-      const [usagePayload, contextPayload, jobsPayload] = await Promise.all([
+      const [usagePayload, contextPayload, jobsPayload, adminPayload] = await Promise.all([
         endpoints.storageUsage(),
         endpoints.contextStatus().catch(() => null),
         endpoints.storageJobs(10).catch(() => ({ jobs: [] })),
+        endpoints.adminJobs(20).catch(() => ({ jobs: [] })),
       ]);
       usage = usagePayload;
       contextStatus = contextPayload;
       jobs = jobsPayload.jobs || [];
+      adminJobs = adminPayload.jobs || [];
       const available = new Set(
         (usage.categories || [])
           .filter((category) => category.reclaimable)
@@ -102,7 +111,7 @@ export async function render(container, ctx) {
       }
       renderAll();
     } catch (e) {
-      fill(container, card('存储与缓存', '', empty(`读取存储信息失败：${e.message}`)));
+      fill(container, card('存储与数据', '', empty(`读取存储信息失败：${e.message}`)));
     } finally {
       refreshButton.disabled = false;
     }
@@ -113,6 +122,7 @@ export async function render(container, ctx) {
     renderUsage();
     renderCleanup();
     renderContext();
+    renderAdmin();
     renderJobs();
   }
 
@@ -281,9 +291,69 @@ export async function render(container, ctx) {
     ));
   }
 
+  function renderAdmin() {
+    const rows = adminJobs.map((job) => h('tr', {},
+      h('td', { class: 'field-help' }, isoLocal(job.created_at)),
+      h('td', {}, job.action || '—'),
+      h('td', {}, job.subject || '—'),
+      h('td', {}, stateBadge(job.state)),
+      h('td', { class: 'field-help' }, job.phase || '—'),
+      h('td', { class: 'field-help' },
+        job.result?.bytes_freed
+          ? formatBytes(job.result.bytes_freed)
+          : job.error_message || '—'),
+      h('td', {},
+        ['queued', 'running', 'cancelling'].includes(job.state)
+          ? h('button', {
+            class: 'btn btn-sm',
+            onclick: async () => {
+              try {
+                await endpoints.adminCancelJob(job.job_id);
+                ctx.toast('已请求取消', 'ok');
+                await refresh();
+              } catch (e) {
+                ctx.toast(e.message, 'error');
+              }
+            },
+          }, '取消')
+          : ''),
+    ));
+    fill(adminHost,
+      card('卸载 KarenBot',
+        '停止服务并删除本机源码、虚拟环境、数据目录和程序备份。'
+        + '不会修改 GitHub、NapCat、Docker、系统 keyring，也不会删除 ~/Debata_BeiFen 或 ~/debata-backups。',
+        h('p', { class: 'field-help' },
+          '所有危险操作都需要预览、输入确认短语并勾选确认；可选备份默认关闭。'
+          + '卸载执行后 WebUI 会退出，删除助手在后台继续。'),
+        h('div', { class: 'row' },
+          h('button', {
+            class: 'btn btn-danger',
+            onclick: () => openUninstall(ctx),
+          }, '检查影响并卸载'),
+        ),
+      ),
+      card('人格运行数据',
+        '在人格页对指定人格执行“清理运行数据”：删除聊天/记忆/RAG/私有知识，'
+        + '保留人格定义、角色形象、共享知识、黑话与 workspace。',
+        h('div', { class: 'row' },
+          h('button', {
+            class: 'btn',
+            onclick: () => ctx.navigate('personas'),
+          }, '打开人格页'),
+        ),
+      ),
+      card('最近的数据管理任务',
+        '任务元数据保存在维护数据库中；卸载任务在后端退出后由独立助手继续。',
+        rows.length ? table(
+          ['时间', '操作', '对象', '状态', '阶段', '结果', '操作'], rows,
+        ) : empty('还没有危险操作记录'),
+      ),
+    );
+  }
+
   function renderJobs() {
     if (!jobs.length) {
-      fill(jobsHost, card('清理任务', '', empty('暂无清理任务')));
+      fill(jobsHost, card('缓存清理任务', '', empty('暂无清理任务')));
       return;
     }
     const rows = jobs.map((job) => {
@@ -313,7 +383,7 @@ export async function render(container, ctx) {
         h('td', {}, ...actions),
       );
     });
-    fill(jobsHost, card('清理任务', '任务持久化在 maintenance.sqlite3；刷新或重开页面后可查询。',
+    fill(jobsHost, card('缓存清理任务', '任务持久化在 maintenance.sqlite3；刷新或重开页面后可查询。',
       table(['创建时间', '状态', '类别', '已释放', '缓存条目', '跳过', '操作'], rows),
     ));
   }

@@ -41,6 +41,7 @@ async def list_knowledge(
         "persona_id": service.persona_id,
         "entries": entries,
         "stats": service.stats(),
+        "persona_image": service.persona_image_info(),
         "writable": bool(service.store.writable),
         "state": service.get_state(),
         "settings": {

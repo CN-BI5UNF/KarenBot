@@ -480,6 +480,18 @@ def duplicate_persona(paths: Any, name: str, new_name: str) -> str:
             if item.name == BACKUP_DIR:
                 continue  # 别人的历史备份不必跟着复制
             if item.is_dir():
+                # 角色形象放在 appearance/ 下，跟着人格复制；其它目录
+                # （缓存/备份）不复制，避免把运行时垃圾带过去。
+                if item.name != "appearance":
+                    continue
+                if item.is_symlink():
+                    raise PersonaAdminError("复制失败：形象目录是符号链接")
+                target_sub = target_dir / item.name
+                target_sub.mkdir()
+                for child in item.iterdir():
+                    if child.is_symlink() or not child.is_file():
+                        raise PersonaAdminError("复制失败：形象目录包含非常规文件")
+                    (target_sub / child.name).write_bytes(child.read_bytes())
                 continue
             (target_dir / item.name).write_bytes(item.read_bytes())
     except OSError as e:

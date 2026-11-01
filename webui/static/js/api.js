@@ -29,8 +29,9 @@ async function request(method, path, body, options = {}) {
   const init = {
     method,
     credentials: 'same-origin',
-    headers: {},
+    headers: { ...(options.headers || {}) },
   };
+  if (options.admin) init.headers['X-Karen-Admin'] = '1';
 
   if (body !== undefined && !(body instanceof FormData)) {
     init.headers['Content-Type'] = 'application/json';
@@ -179,6 +180,33 @@ export const endpoints = {
   activatePersona: (name) => api.post(`/api/personas/${encodeURIComponent(name)}/activate`),
   deletePersona: (name) => api.del(`/api/personas/${encodeURIComponent(name)}`),
   personaPrompt: (name) => api.get(`/api/personas/${encodeURIComponent(name)}/prompt`),
+  personaAppearance: (name) =>
+    api.get(`/api/personas/${encodeURIComponent(name)}/appearance`),
+  personaAppearanceUrl: (name, version = '', imageId = '') => {
+    const query = new URLSearchParams();
+    if (version) query.set('v', version);
+    if (imageId) query.set('image_id', imageId);
+    const suffix = query.toString() ? `?${query}` : '';
+    return `/api/personas/${encodeURIComponent(name)}/appearance/file${suffix}`;
+  },
+  uploadPersonaAppearance: (name, formData) =>
+    api.post(
+      `/api/personas/${encodeURIComponent(name)}/appearance`,
+      formData,
+      { timeoutMs: 120000 },
+    ),
+  setPersonaAppearanceCover: (name, imageId) =>
+    api.post(
+      `/api/personas/${encodeURIComponent(name)}/appearance/${encodeURIComponent(imageId)}/cover`,
+      {},
+      { timeoutMs: 30000 },
+    ),
+  deletePersonaAppearanceImage: (name, imageId) =>
+    api.del(
+      `/api/personas/${encodeURIComponent(name)}/appearance/${encodeURIComponent(imageId)}`,
+    ),
+  deletePersonaAppearance: (name) =>
+    api.del(`/api/personas/${encodeURIComponent(name)}/appearance`),
   importPersona: (formData) => api.upload('/api/personas/import', formData),
 
   // 人格生成 / 改写 / 复制
@@ -210,6 +238,14 @@ export const endpoints = {
   containerStorage: () => api.get('/api/container/storage', { timeoutMs: 30000 }),
   containerStorageSetup: (payload = {}) =>
     api.post('/api/container/storage/setup', payload, { timeoutMs: 330000 }),
+  containerFiles: (path = '/workspace') =>
+    api.get(`/api/container/files?path=${encodeURIComponent(path)}`, {
+      timeoutMs: 120000,
+    }),
+  containerFileContent: (path) =>
+    api.get(`/api/container/files/content?path=${encodeURIComponent(path)}`, {
+      timeoutMs: 60000,
+    }),
   containerTest: () => api.post('/api/container/test', {}, { timeoutMs: 660000 }),
   containerReset: () => api.post('/api/container/reset', {}, { timeoutMs: 60000 }),
 
@@ -234,6 +270,8 @@ export const endpoints = {
   testProviderConfig: (payload) => api.post('/api/providers/test', payload),
   fetchProviderModels: (payload) => api.post('/api/providers/fetch-models', payload),
 
+  accessLists: () => api.get('/api/settings/lists'),
+  saveAccessLists: (payload) => api.put('/api/settings/lists', payload),
   blacklist: () => api.get('/api/settings/blacklist'),
   saveBlacklist: (payload) => api.put('/api/settings/blacklist', payload),
 
@@ -247,6 +285,29 @@ export const endpoints = {
     api.post(`/api/storage/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
   storageRestore: (jobId) =>
     api.post(`/api/storage/jobs/${encodeURIComponent(jobId)}/restore`, {}),
+
+  adminPersonaCleanupPreview: (name) =>
+    api.post(
+      `/api/admin/personas/${encodeURIComponent(name)}/cleanup/preview`,
+      {},
+      { timeoutMs: 180000, admin: true },
+    ),
+  adminPersonaCleanupExecute: (name, payload) =>
+    api.post(
+      `/api/admin/personas/${encodeURIComponent(name)}/cleanup/execute`,
+      payload,
+      { timeoutMs: 600000, admin: true },
+    ),
+  adminUninstallPreview: () =>
+    api.post('/api/admin/uninstall/preview', {}, { timeoutMs: 180000, admin: true }),
+  adminUninstallExecute: (payload) =>
+    api.post('/api/admin/uninstall/execute', payload, { timeoutMs: 600000, admin: true }),
+  adminJobs: (limit = 20) =>
+    api.get(`/api/admin/jobs?limit=${limit}`, { admin: true }),
+  adminJob: (jobId) =>
+    api.get(`/api/admin/jobs/${encodeURIComponent(jobId)}`, { admin: true }),
+  adminCancelJob: (jobId) =>
+    api.post(`/api/admin/jobs/${encodeURIComponent(jobId)}/cancel`, {}, { admin: true }),
 
   contextStatus: () => api.get('/api/context/status'),
   // 手动压缩要等摘要模型完成，15 秒默认超时会先报错但服务端仍在跑。

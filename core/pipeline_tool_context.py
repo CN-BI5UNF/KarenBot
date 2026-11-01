@@ -56,6 +56,10 @@ class PipelineToolContextMixin:
         if latest_user_text:
             extras["latest_user_message"] = latest_user_text
         extras["chat_timeline"] = self.chat_timeline
+        extras["persona_image_store"] = getattr(self, "persona_image_store", None)
+        extras["persona_name"] = str(
+            getattr(getattr(self, "persona", None), "name", "") or ""
+        )
         extras["task_phase"] = task_phase
         extras["seen_inbound_seq"] = int(seen_inbound_seq or trigger_inbound_seq or 0)
         extras["focus_user_ids"] = list(focus_user_ids or [])
@@ -95,7 +99,9 @@ class PipelineToolContextMixin:
             history=self.history,
             archive=self.archive,
             wakeup_cb=self.wakeup_scheduler.schedule,
+            chat_selection_cb=self.apply_group_chat_selection,
             vision=self.vision,
+            main_vision=getattr(self, "main_vision", None),
             web_search=self.web_search,
             web_fetch=getattr(self, "web_fetch", None),
             knowledge_service=getattr(self, "knowledge_service", None),

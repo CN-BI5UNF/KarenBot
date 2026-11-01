@@ -18,6 +18,8 @@ from typing import Any
 from adapters.types import IncomingMessage, Target
 from utils import get_time
 
+from .group_chat_selection import build_group_chat_selection
+from .send_helpers import _text_mentions_self_or_role
 from .state import PendingMessageItem
 
 logger = logging.getLogger(__name__)
@@ -102,6 +104,14 @@ class PipelineInboundMixin:
 
         # 重建可读文本（CQ 码 + 媒体）
         text = await self._build_readable_text(event)
+        if event.is_group() and not self._group_selection_allows(event, text):
+            logger.info(
+                "群聊接收范围过滤 conversation_id=%s group_id=%s msg_id=%s",
+                conversation_id,
+                event.group_id,
+                event.message_id,
+            )
+            return
         await self._notify_subconscious_inbound(event, text)
         self._inbound_seq += 1
         inbound_seq = self._inbound_seq
@@ -139,6 +149,27 @@ class PipelineInboundMixin:
             text=text,
             received_at=received_at,
         )
+        if await self._should_buffer_inbound_for_working_persona():
+            if self._work_item_should_be_queued(item, text):
+                async with self._work_lock:
+                    self._work_pending.append(item)
+                self._ensure_work_watch_task()
+                logger.info(
+                    "人格工作中，入站消息暂存 conversation_id=%s msg_id=%s",
+                    conversation_id,
+                    event.message_id,
+                )
+            else:
+                await self._record_resting_inbound_item(
+                    item,
+                    suppressed_reason="persona_working",
+                )
+                logger.info(
+                    "人格工作中，非 @ 群消息仅记录 conversation_id=%s msg_id=%s",
+                    conversation_id,
+                    event.message_id,
+                )
+            return
         if await self._should_buffer_inbound_for_resting_persona():
             await self._record_resting_inbound_item(item)
             logger.info(
@@ -147,6 +178,11 @@ class PipelineInboundMixin:
                 event.message_id,
             )
             return
+
+        # 工作刚结束（可能由本条消息触发结算）时，先放回暂存消息，
+        # 保证旧消息排在新消息前面进入批处理。
+        if self._work_pending:
+            await self._release_work_pending()
 
         await self.batch.append(item)
         self._send_manager.notify_inbound(item)
@@ -274,6 +310,135 @@ class PipelineInboundMixin:
         except Exception:
             logger.debug("潜意识入站消息通知失败", exc_info=True)
 
+    def apply_group_chat_selection(
+        self,
+        *,
+        mode: str,
+        group_ids: list[int] | None = None,
+        duration_minutes: int = 60,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Update the temporary group receive filter from the tool layer."""
+        selection = build_group_chat_selection(
+            mode=mode,
+            group_ids=group_ids,
+            duration_minutes=duration_minutes,
+            reason=reason,
+        )
+        self.group_chat_selection = selection
+        return selection.snapshot()
+
+    def _group_selection_allows(self, event: IncomingMessage, text: str) -> bool:
+        selection = getattr(self, "group_chat_selection", None)
+        if selection is None or not selection.is_active():
+            return True
+        role_name = ""
+        persona = getattr(self, "persona", None)
+        display_name = getattr(persona, "display_name", None)
+        if callable(display_name):
+            try:
+                role_name = str(display_name() or "")
+            except Exception:
+                role_name = ""
+        if not role_name:
+            role_name = str(getattr(persona, "name", "") or "")
+        is_mention = _text_mentions_self_or_role(
+            text,
+            str(getattr(event, "self_id", "") or ""),
+            role_name,
+        )
+        return selection.allows(event.group_id, is_mention)
+
+    async def _should_buffer_inbound_for_working_persona(self) -> bool:
+        """人格处于「工作」状态时不直接唤起主模型。"""
+
+        persona_agent = getattr(self, "persona_agent", None)
+        if persona_agent is None:
+            return False
+        is_working = getattr(persona_agent, "is_working", None)
+        if is_working is not None:
+            try:
+                working = is_working() if callable(is_working) else is_working
+                if inspect.isawaitable(working):
+                    working = await working
+                if working:
+                    return True
+                # 定时维护可能还没跑到；工作已到期就先把状态结算掉。
+                if await self._persona_current_action(persona_agent) == "working":
+                    end = getattr(persona_agent, "on_work_end", None)
+                    if callable(end):
+                        result = end("expired")
+                        if inspect.isawaitable(result):
+                            await result
+                return False
+            except Exception:
+                logger.debug("读取人格工作状态失败，继续尝试 current_action", exc_info=True)
+        action = await self._persona_current_action(persona_agent)
+        return action == "working"
+
+    def _work_item_should_be_queued(self, item: PendingMessageItem, text: str) -> bool:
+        """工作结束后需要交给模型的只有私聊和群聊 @。"""
+        conversation_id = str(getattr(item, "conversation_id", "") or "")
+        if conversation_id.startswith("private:"):
+            return True
+        if not conversation_id.startswith("group:"):
+            return False
+        self_id = self._self_id_by_conversation.get(conversation_id, "")
+        role_name = ""
+        persona = getattr(self, "persona", None)
+        display_name = getattr(persona, "display_name", None)
+        if callable(display_name):
+            try:
+                role_name = str(display_name() or "")
+            except Exception:
+                role_name = ""
+        if not role_name:
+            role_name = str(getattr(persona, "name", "") or "")
+        return _text_mentions_self_or_role(text, self_id, role_name)
+
+    def _ensure_work_watch_task(self) -> None:
+        task = getattr(self, "_work_watch_task", None)
+        if task is not None and not task.done():
+            return
+        self._work_watch_task = asyncio.create_task(self._work_watch_loop())
+
+    async def _work_watch_loop(self) -> None:
+        """等工作（以及随后的休息）结束后，把暂存消息交回主批处理。"""
+        try:
+            while True:
+                if await self._should_buffer_inbound_for_working_persona():
+                    await asyncio.sleep(1.0)
+                    continue
+                if await self._should_buffer_inbound_for_resting_persona():
+                    await asyncio.sleep(1.0)
+                    continue
+                await self._release_work_pending()
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("工作状态暂存消息释放失败")
+
+    async def _release_work_pending(self) -> None:
+        async with self._work_lock:
+            items = list(self._work_pending)
+            self._work_pending.clear()
+        if not items:
+            return
+        target: Target | None = None
+        for item in items:
+            await self.batch.append(item)
+            self._send_manager.notify_inbound(item)
+            raw_event = getattr(item, "raw_event", None)
+            target = target or getattr(raw_event, "source_target", None)
+        logger.info("人格退出工作状态，释放暂存消息 %s 条", len(items))
+        if target is None:
+            logger.warning("工作暂存消息缺少发送目标，等待下一次入站批处理")
+            return
+        task = getattr(self, "_batch_task", None)
+        if task is None or task.done():
+            self._batch_task = asyncio.create_task(self._batch_loop(target))
+
     async def _should_buffer_inbound_for_resting_persona(self) -> bool:
         """普通入站消息不应在人格休息时直接唤起主聊天模型。"""
 
@@ -321,13 +486,18 @@ class PipelineInboundMixin:
             return ""
         return str(_read_nested_field(snapshot, "current_action", "action") or "").strip().lower()
 
-    async def _record_resting_inbound_item(self, item: PendingMessageItem) -> None:
-        """休息期间的消息只进历史/事件，不进入主批处理。"""
+    async def _record_resting_inbound_item(
+        self,
+        item: PendingMessageItem,
+        *,
+        suppressed_reason: str = "persona_resting",
+    ) -> None:
+        """休息/工作期间无需回放的消息只进历史/事件，不进入主批处理。"""
 
         user_record = self._build_user_record([item])
         metadata = user_record.setdefault("metadata", {})
         if isinstance(metadata, dict):
-            metadata["suppressed_reason"] = "persona_resting"
+            metadata["suppressed_reason"] = suppressed_reason
         await self.history.add_records(
             [user_record],
             conversation_id=item.conversation_id,

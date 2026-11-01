@@ -391,6 +391,7 @@ def _pm_cfg(
     *,
     energy: str = "disabled",
     satiety: str = "disabled",
+    work_max_minutes: int = 240,
     daily_fallback_hour: int = 4,
 ) -> PersonaManagementConfig:
     return PersonaManagementConfig(
@@ -398,6 +399,7 @@ def _pm_cfg(
         physiology={
             "energy": {"mode": energy},
             "satiety": {"mode": satiety},
+            "work": {"max_minutes": work_max_minutes},
         },
         consolidation={"daily_fallback_hour": daily_fallback_hour},
     )

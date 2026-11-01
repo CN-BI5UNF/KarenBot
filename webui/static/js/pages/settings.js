@@ -1038,6 +1038,10 @@ export async function render(container, ctx) {
                     h('p', { class: 'gate-hint' }, 'WebUI 服务已关闭，可以关闭此页面。'))));
             },
           }, '退出 WebUI'),
+          h('button', {
+            class: 'btn btn-danger',
+            onclick: () => ctx.navigate('storage'),
+          }, '存储与数据'),
         ),
       ),
     );

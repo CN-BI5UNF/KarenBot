@@ -74,6 +74,7 @@ class Runtime:
         self.secrets: Any = None
         self.paths: Any = None
         self.persona: Any = None
+        self.persona_image_store: Any = None
         self.history: Any = None
         self.event_store: Any = None
         self.important: Any = None
@@ -105,6 +106,8 @@ class Runtime:
         self.event_bus: Any = None
 
         self.vision: Any = None
+        self.main_vision: Any = None
+        """主模型原生图片输入的 describe_image 兜底，不拥有 provider。"""
         self._vision_provider: Any = None
         self.web_search: Any = None
         self.web_fetch: Any = None
@@ -222,6 +225,9 @@ class Runtime:
                     resolved,
                     save_exc,
                 )
+        from .persona_image import PersonaImageStore
+
+        self.persona_image_store = PersonaImageStore(self.paths)
         logger.debug(f"人格已加载: {self.persona.name}")
         logger.debug("Runtime 阶段完成：人格加载 %.2fs", time.monotonic() - stage_t0)
 
@@ -245,7 +251,16 @@ class Runtime:
         mem_dir = self.paths.memory_dir_for(self.persona.name)
         mem_dir.mkdir(parents=True, exist_ok=True)
         runtime_db_path = self._prepare_runtime_memory_db_path(mem_dir, self.persona.name)
-        usage_source_path = self.paths.LOGS_DIR / "model_usage.jsonl"
+        from .persona_cleanup_state import legacy_usage_import_suppressed
+
+        suppress_legacy_usage = legacy_usage_import_suppressed(
+            self.paths, self.persona.name
+        )
+        usage_source_path = (
+            None
+            if suppress_legacy_usage
+            else self.paths.LOGS_DIR / "model_usage.jsonl"
+        )
         if self._needs_legacy_memory_import(
             runtime_db_path,
             mem_dir,
@@ -258,6 +273,7 @@ class Runtime:
                 self.persona.name,
                 usage_source_path=usage_source_path,
                 skip_existing_domains=True,
+                import_usage=not suppress_legacy_usage,
             )
         self.usage_stats = KarenUsageStatsStore(runtime_db_path, self.persona.name)
         await self.usage_stats.load()
@@ -650,6 +666,7 @@ class Runtime:
             web_search=getattr(self, "knowledge_search", None) or self.web_search,
             provider_resolver=_slang_provider,
             usage_recorder=self._record_model_usage,
+            persona_image_store=self.persona_image_store,
         )
 
         self.token_calibration = TokenCalibrationStore(
@@ -702,6 +719,7 @@ class Runtime:
             "summary_agent": self.summary_agent,
             "model_context_length": chat_context_length,
             "vision": self.vision,
+            "main_vision": self.main_vision,
             "main_model_images_enabled": main_model_images_enabled,
             "image_limits": vision_cfg.image_limits.to_image_limits(),
             "image_budget_profile": image_budget_profile,
@@ -717,6 +735,7 @@ class Runtime:
             "container": self.container,
             "slang_service": self.slang_service,
             "knowledge_service": self.knowledge_service,
+            "persona_image_store": self.persona_image_store,
             "asr": self.asr,
             "tts": self.tts,
             "rag_memory": self.rag_memory,
@@ -891,6 +910,7 @@ class Runtime:
     async def _teardown_vision(self) -> None:
         """只关闭独立拥有的 provider；重复调用安全。"""
         self.vision = None
+        self.main_vision = None
         provider = self._vision_provider
         self._vision_provider = None
         if provider is None:
@@ -901,6 +921,43 @@ class Runtime:
             logger.warning("关闭独立视觉 provider 失败")
 
     async def _setup_vision(self) -> None:
+        """装配独立视觉服务，并为主模型原生图片输入准备兜底。"""
+        await self._teardown_vision()
+        await self._setup_vision_service()
+        await self._setup_main_vision_fallback()
+
+    async def _setup_main_vision_fallback(self) -> None:
+        """主模型开启原生图片输入时，允许 describe_image 复用主聊天模型。
+
+        独立视觉服务优先；这里只是兜底，并且不拥有/不关闭主模型 provider。
+        """
+        self.main_vision = None
+        if not self._main_model_images_enabled():
+            return
+        chat_cfg = self.config.agents.chat
+        provider = getattr(getattr(self, "chat_agent", None), "provider", None)
+        if provider is None or not str(chat_cfg.model or "").strip():
+            return
+        try:
+            from features import VisionService
+
+            self.main_vision = VisionService(
+                provider=provider,
+                model=chat_cfg.model,
+                provider_id=chat_cfg.provider,
+                max_tokens=int(self.config.features.vision.max_tokens or 1024),
+                usage_recorder=self._record_model_usage,
+            )
+            logger.info(
+                "describe_image 使用主模型原生视觉兜底：provider=%s, model=%s",
+                chat_cfg.provider,
+                chat_cfg.model,
+            )
+        except Exception:  # noqa: BLE001
+            self.main_vision = None
+            logger.warning("主模型原生视觉兜底构造失败")
+
+    async def _setup_vision_service(self) -> None:
         """独立视觉服务按 enabled 装配；构造失败仅记录错误，不自动改写用户配置。"""
         # 重复装配时先释放旧客户端，避免静默泄漏；关闭状态不读 secret/不构造。
         await self._teardown_vision()
@@ -1137,7 +1194,11 @@ class Runtime:
             await _close("tts", self.tts.aclose)
         if self.plugin_manager is not None:
             await _close("plugin_manager", self.plugin_manager.shutdown_all)
-        if self._vision_provider is not None or self.vision is not None:
+        if (
+            self._vision_provider is not None
+            or self.vision is not None
+            or self.main_vision is not None
+        ):
             await _close("vision_provider", self._teardown_vision)
         if self.provider_registry is not None:
             await _close("provider_registry", self.provider_registry.close_all)
@@ -1187,7 +1248,7 @@ class Runtime:
         runtime_db_path: Path,
         mem_dir: Path,
         persona_id: str,
-        usage_source_path: Path,
+        usage_source_path: Path | None,
     ) -> bool:
         """仅当旧源存在且实际运行时库目标域为空时才触发旧文件导入。"""
 
@@ -1201,8 +1262,9 @@ class Runtime:
                 mem_dir / "events.sqlite3.append.jsonl",
             ),
             "archive_messages": (mem_dir / "archive.sqlite3",),
-            "usage_records": (usage_source_path,),
         }
+        if usage_source_path is not None:
+            legacy_sources["usage_records"] = (usage_source_path,)
         if not any(
             path.exists()
             for source_paths in legacy_sources.values()

@@ -21,9 +21,11 @@ import zipfile
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from core.persona_image import PersonaImageError, PersonaImageStore
+from utils.image_contracts import MAX_IMAGE_BYTES
 from webui import persona_admin
 from webui.persona_admin import PersonaAdminError
 
@@ -50,6 +52,25 @@ def _persona_dirs(paths: Any) -> list[Path]:
     )
 
 
+def _persona_images(rt: Any) -> PersonaImageStore:
+    store = getattr(rt, "persona_image_store", None)
+    return store if isinstance(store, PersonaImageStore) else PersonaImageStore(rt.paths)
+
+
+def _safe_appearance(rt: Any, name: str) -> dict[str, Any] | None:
+    try:
+        return _persona_images(rt).get(name)
+    except (PersonaImageError, OSError):
+        return None
+
+
+def _safe_appearance_count(rt: Any, name: str) -> int:
+    try:
+        return _persona_images(rt).count(name)
+    except (PersonaImageError, OSError):
+        return 0
+
+
 @router.get("")
 async def list_personas(request: Request) -> dict[str, Any]:
     rt = require_runtime(request)
@@ -66,9 +87,120 @@ async def list_personas(request: Request) -> dict[str, Any]:
                 "builtin": name in BUILTIN_PERSONAS,
                 "path": str(directory),
                 "description": _read_description(directory),
+                "appearance": _safe_appearance(rt, name),
+                "appearance_count": _safe_appearance_count(rt, name),
             }
         )
     return {"personas": items, "active": active}
+
+
+@router.get("/{name}/appearance")
+async def get_persona_appearance(request: Request, name: str) -> dict[str, Any]:
+    rt = require_runtime(request)
+    store = _persona_images(rt)
+    try:
+        images = store.list_images(name)
+        info = store.get(name)
+    except PersonaImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if info is None:
+        raise HTTPException(status_code=404, detail="该人格还没有角色形象")
+    return {
+        "ok": True,
+        "appearance": info,
+        "cover_id": info.get("id"),
+        "images": images,
+    }
+
+
+@router.get("/{name}/appearance/file")
+async def get_persona_appearance_file(
+    request: Request,
+    name: str,
+    image_id: str | None = Query(None),
+) -> FileResponse:
+    rt = require_runtime(request)
+    try:
+        store = _persona_images(rt)
+        path = store.resolve(name, image_id)
+        info = store.get(name, image_id) or {}
+    except PersonaImageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(
+        path,
+        media_type=str(info.get("mime") or "application/octet-stream"),
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
+@router.post("/{name}/appearance")
+async def upload_persona_appearance(
+    request: Request,
+    name: str,
+    file: Annotated[UploadFile, File()],
+) -> dict[str, Any]:
+    rt = require_runtime(request)
+    data = await file.read(MAX_IMAGE_BYTES + 1)
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"图片超过 {MAX_IMAGE_BYTES // 1024 // 1024} MiB 上限",
+        )
+    try:
+        info = await _persona_images(rt).save(name, data)
+    except PersonaImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "appearance": info,
+        "message": f"已添加 {name} 的角色形象",
+    }
+
+
+@router.post("/{name}/appearance/{image_id}/cover")
+async def set_persona_appearance_cover(
+    request: Request,
+    name: str,
+    image_id: str,
+) -> dict[str, Any]:
+    rt = require_runtime(request)
+    try:
+        info = _persona_images(rt).set_cover(name, image_id)
+    except PersonaImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "appearance": info, "message": "已设为角色形象预览图"}
+
+
+@router.delete("/{name}/appearance/{image_id}")
+async def delete_persona_appearance_image(
+    request: Request,
+    name: str,
+    image_id: str,
+) -> dict[str, Any]:
+    rt = require_runtime(request)
+    try:
+        result = _persona_images(rt).delete(name, image_id)
+    except PersonaImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        **result,
+        "message": "已删除该角色形象",
+    }
+
+
+@router.delete("/{name}/appearance")
+async def delete_persona_appearance(request: Request, name: str) -> dict[str, Any]:
+    rt = require_runtime(request)
+    try:
+        result = _persona_images(rt).delete(name)
+    except PersonaImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        **result,
+        "message": "已删除角色形象" if result.get("deleted") else "该人格没有可删除的角色形象",
+    }
 
 
 def _read_description(directory: Path) -> str:
@@ -241,11 +373,23 @@ async def activate(request: Request, name: str) -> dict[str, Any]:
 @router.delete("/{name}")
 async def delete_persona(request: Request, name: str) -> dict[str, Any]:
     rt = require_runtime(request)
-    directory = Path(rt.paths.PERSONAS_DIR) / name
+    try:
+        name = persona_admin.validate_persona_name(name)
+    except PersonaAdminError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    root = Path(rt.paths.PERSONAS_DIR)
+    directory = root / name
     if name in BUILTIN_PERSONAS:
         raise HTTPException(status_code=400, detail=f"{name} 是内置人格，不能删除")
     if name == getattr(rt.config.persona, "active", ""):
         raise HTTPException(status_code=400, detail="不能删除当前正在使用的人格，请先切换")
+    if directory.is_symlink():
+        raise HTTPException(status_code=400, detail="拒绝删除符号链接人格目录")
+    try:
+        if directory.resolve().parent != root.resolve():
+            raise HTTPException(status_code=400, detail="人格目录越界")
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"无法检查人格目录：{exc}") from exc
     if not directory.is_dir():
         raise HTTPException(status_code=404, detail=f"人格 {name!r} 不存在")
     await asyncio.to_thread(shutil.rmtree, directory)

@@ -4,6 +4,121 @@
 
 > 项目已由 Debata_Agent 更名为 KarenBot。以下历史条目保留当时的旧名称，以便追溯；上游项目仍为 [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent)。
 
+## [1.0.0-beta] — 2026-11-01
+
+### Added
+
+- 人格页「角色形象」升级为多图图库：支持多选上传、逐张删除、设置列表预览图；
+  `manifest.json` 和图片保存在 `personas/<name>/appearance/`，随人格导出、复制和
+  导入。旧版单图 `image.*` 仍可读取；图片校验格式、尺寸和体积，最长边缩放到 2048，
+  单张上限 8 MiB。
+- 角色形象以只读虚拟知识条目暴露给当前人格：`list_knowledge_notes` 返回预览图和
+  每张图的 `persona-image:<当前人格>:<图片ID>` 引用；模型可用 `describe_image`
+  查看，也可直接填入 `send_private_messages` / `send_group_message` 的 `image`
+  字段作为图片发送。虚拟条目不写入 `knowledge.json`，LLM 没有写入/删除接口，
+  也不能读取其他人格形象。
+- 新增 `GET/POST/DELETE /api/personas/{name}/appearance`、
+  `POST /api/personas/{name}/appearance/{image_id}/cover`、
+  `DELETE /api/personas/{name}/appearance/{image_id}` 与按 `image_id` 读取图片的
+  文件接口；人格列表返回预览图和图片数量。
+- 新增统一名单页「黑白名单」和 `GET/PUT /api/settings/lists`，把白名单模式/名单和
+  黑名单开关/名单合并到同一页；保存后通过 `apply_whitelist` / `apply_blacklist`
+  热更新，无需重启。
+- 新增 `chat_selection` 工具：模型可临时暂停普通群聊接收，或只接收 `group_ids`
+  中的群；所有群的 @ 消息仍会推送，私聊不受影响；到时自动恢复。
+- 新增人格自主「工作」状态与 `work` 工具：模型可在准备长时间容器任务前进入；
+  期间群聊 @ 和私聊暂存，普通群消息只记录，退出工作状态后统一交给模型。
+  单次上限由 `persona_management.physiology.work.max_minutes` 控制（默认 240，
+  0 为禁用），到时自动退出。
+- `describe_image` 新增主模型原生视觉兜底：独立视觉未开启但
+  `features.vision.main_model_images` 可用时，复用主聊天模型看图，不再误报
+  「未启用图像理解功能」。
+
+### Changed
+
+- 设置 → 渠道不再重复显示白名单字段；入口统一到左侧「黑白名单」。
+- 设置 →「人格与生理」新增「单次工作上限」；主模型原生图片输入开启时，
+  `describe_image` 与角色形象查看不再要求独立视觉 provider。
+- 角色形象文件放在人格定义目录，不进入 AI workspace，因此模型的文件/容器工具无法
+  修改它；人格运行时清理也不会删除形象。
+- 「存储与缓存」与「数据管理」合并为「存储与数据」页：缓存盘点/清理、上下文预算、
+  人格运行数据清理、本地卸载和管理任务集中在一页；旧 `#data_admin` 深链自动跳转。
+- 直接写提示词保存时改用三引号 Python 字面量，源码预览保留真实换行，不再显示成
+  大量 `\n`；已有提示词文件不会被改写。
+- 版本号更新为 `1.0.0-beta`。
+- 更新知识、人格编写、WebUI、功能和 README 文档，以及人格/名单/知识/视觉测试。
+
+### Fixed
+
+- 自定义人格直接写入提示词后，「查看人设」源码预览不再把换行显示为大量 `\n`。
+- 存储与数据页合并后，旧数据管理入口和深链仍然可用。
+
+### Security
+
+- 角色形象上传走受限图片规范化，拒绝非图片、超大文件、越界人格名和符号链接目录/文件。
+- LLM 只能通过当前人格的只读引用访问形象；`delete_knowledge_note` 无法删除虚拟形象条目。
+- 黑白名单保存时对 QQ/群号去重、过滤非正数；黑名单仍优先于白名单和管理员审核。
+
+## [Unreleased] — 黑话搜索与容器文件管理
+
+### Added
+
+- 黑话管理页新增搜索：可按词条、释义、用法、示例和风险提示查询，并与群号、状态筛选组合；`GET /api/slang?q=` 返回匹配条目和过滤后的统计。
+- 同群同名 AI 黑话申请自动拒绝：原词条不被改写，重复申请以 `rejected` + `duplicate_term` 记录保留在列表中并显示拒绝原因；启动时的旧重复合并不会删除这些记录。
+- WebUI「容器」页新增只读文件管理器：`/workspace` 目录导航、路径输入、面包屑、当前目录筛选和文本预览；符号链接不跟随，二进制文件只显示元数据，目录最多返回 1000 项。
+- 新增 `GET /api/container/files` 与 `GET /api/container/files/content`，使用容器内 Python 标准库生成结构化 JSON，路径仍限制在 `/workspace`。
+
+### Changed
+
+- 黑话重复申请不再把释义、用法或证据并入已有效词条；管理员只有在原词条不再有效或修改重复记录的词条后才能确认它。
+- 更新 `docs/container.md`、`docs/feature_guides/slang.md`、`docs/features.md`、`README*.md` 与 API/UI 测试。
+
+### Security
+
+- 容器文件管理只接受 `/workspace` 下的路径；拒绝符号链接路径，文本预览上限 128 KiB，二进制内容不返回浏览器。
+- 黑话自动拒绝记录仍属于群内管理数据，`lookup_slang` 只返回已确认且有释义的条目。
+
+## [Unreleased] — 数据清理与本地完全卸载
+
+### Added
+
+- WebUI 新增「数据管理」页；人格页新增「清理运行数据」。两者都先显示影响预览，再要求勾选和输入确认短语，服务端校验一次性令牌、generation 与幂等键。
+- 人格运行数据清理：删除指定人格的 `memory/`、`vector/` 和非共享知识，保留人格定义、共享知识/黑话、workspace、日志、配置和备份；活动人格会暂停并自动恢复 Runtime，清理后创建空数据库。
+- 本地完全卸载：停止服务后由独立 stdlib-only 助手删除项目源码、虚拟环境、数据目录、程序备份、启动器、systemd 用户 unit 和 env 文件；保留 `~/Debata_BeiFen`、`~/debata-backups`、GitHub、NapCat、Docker 和系统 keyring。
+- 可选备份（默认关闭）：人格清理保存目标人格数据；卸载保存用户数据包和源码归档到删除目标之外，并在删除前再次校验 SHA-256/大小。
+- 新增 `docs/destructive_admin.md`；更新 WebUI、备份、后台运行、功能和 README 文档。
+
+### Changed
+
+- 新增 `memory/admin_store.py` 持久化危险操作预览/任务；`/api/admin/*` 不依赖 Runtime，任务状态在 Runtime 停止时仍可查询。
+- RuntimeHost 增加危险操作管理锁，操作期间拒绝其它启动/重启/退出入口。
+- 人格清理写入持久化 marker，抑制全局 `logs/model_usage.jsonl` 向已清理人格回填用量。
+- 清理人格时只移除非共享知识；群共享黑话不受影响。
+
+### Security
+
+- `/api/admin/*` 在既有 WebUI 鉴权之外要求 `X-Karen-Admin: 1` 和同源 Origin/Sec-Fetch-Site 校验。
+- 删除目标全部由服务端枚举和校验；拒绝任意路径、符号链接根、危险父目录和重叠目标。外部助手复核 plan digest、文件权限、目标 inode、备份哈希和后端退出状态后才删除。
+
+### Limitations
+
+- 自动完全卸载当前仅支持 Linux 非 systemd 托管模式；systemd 用户/系统服务、Windows、macOS 显示手动步骤。
+- 完全卸载后 WebUI 消失，只有 external audit（`~/.local/state/karenbot/uninstall/`）和可选备份可用于确认/恢复。
+- 不删除开发备份、系统 keyring、NapCat、Docker 或 GitHub 远端。
+
+## [Unreleased] — 同群黑话跨人格共享
+
+### Changed
+
+- 黑话改为**按群共享**：同一群内所有人格都能查询、确认、编辑同一份已确认词条，切换人格不再丢黑话；跨群仍然隔离。
+- 同群同词条在写入时跨人格去重；AI 候选若与已有词条同名，现在会作为自动拒绝记录保留可见，不再并入或改写原词条（后续更新见顶部未发布条目）。
+- 启动时自动合并旧版本按人格隔离留下的同群重复项：优先保留已确认状态，合并释义、来源、证据和出现次数，并在写盘前生成 `slang.json.shared-merge-*` 备份。
+- 黑话管理页新增「人格」列和共享提示；`/api/slang` 返回 `shared_across_personas: true`。
+
+### Fixed
+
+- 群聊黑话在切换人格后看不到另一个人格已确认词条的问题。
+
 ## [Unreleased] — KarenBot 改名
 
 ### Changed

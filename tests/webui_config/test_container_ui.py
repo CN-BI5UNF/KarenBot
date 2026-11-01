@@ -35,12 +35,23 @@ def test_container_page_nav_api_and_router_are_registered():
     page_js = (ROOT / "webui/static/js/pages/container.js").read_text(
         encoding="utf-8"
     )
+    files_js = (ROOT / "webui/static/js/container_files.js").read_text(
+        encoding="utf-8"
+    )
     api_js = (ROOT / "webui/static/js/api.js").read_text(encoding="utf-8")
     assert "pages/container.js" in app_js
     assert "key: 'container'" in app_js
     assert "endpoints.containerStatus" in page_js
     assert "endpoints.containerTest" in page_js
+    assert "createContainerFileBrowser" in page_js
+    assert "文件管理" in files_js
+    assert "筛选当前目录" in files_js
+    assert "二进制文件" in files_js
+    assert "endpoints.containerFiles" in files_js
+    assert "endpoints.containerFileContent" in files_js
     assert "containerStatus:" in api_js
     assert "/api/container/status" in api_js
+    assert "containerFiles:" in api_js
+    assert "/api/container/files" in api_js
     prefixes = {getattr(router, "prefix", "") for router in ALL_ROUTERS}
     assert "/api/container" in prefixes

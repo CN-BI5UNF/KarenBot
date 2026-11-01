@@ -23,6 +23,18 @@ router = APIRouter(tags=["system"])
 
 COOKIE_MAX_AGE = SESSION_TTL_SECONDS
 BACKEND_RESTART_DELAY_SECONDS = 1.0
+
+
+def _ensure_no_admin_operation(host: Any) -> None:
+    active = getattr(host, "admin_operation_active", None)
+    if callable(active) and active():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "operation_in_progress",
+                "message": "危险数据操作进行中，暂时不能启动、重启或退出服务",
+            },
+        )
 # 每次进程启动生成一次；WebUI 用它在重启后确认自己连到的是新进程，
 # 而不是仍在优雅退出、还能响应请求的旧进程。
 BOOT_ID = secrets.token_hex(12)
@@ -110,6 +122,7 @@ async def build_identity(request: Request) -> dict[str, Any]:
 async def restart_runtime(request: Request) -> dict[str, Any]:
     """重启 Runtime（改完需要重启的配置后用）。"""
     host = get_host(request)
+    _ensure_no_admin_operation(host)
     hub = request.app.state.hub
     ok = await host.restart()
     hub.attach_timeline()
@@ -161,6 +174,7 @@ async def restart_backend(request: Request) -> dict[str, Any]:
         )
     server = getattr(request.app.state, "server", None)
     host = get_host(request)
+    _ensure_no_admin_operation(host)
     asyncio.create_task(
         _restart_backend_after_delay(server=server, host=host),
         name="restart-backend",
@@ -179,6 +193,7 @@ async def restart_backend(request: Request) -> dict[str, Any]:
 @router.post("/api/system/stop")
 async def stop_runtime(request: Request) -> dict[str, Any]:
     host = get_host(request)
+    _ensure_no_admin_operation(host)
     await host.stop()
     return {"ok": True, "message": "Runtime 已停止"}
 
@@ -186,6 +201,7 @@ async def stop_runtime(request: Request) -> dict[str, Any]:
 @router.post("/api/system/start")
 async def start_runtime(request: Request) -> dict[str, Any]:
     host = get_host(request)
+    _ensure_no_admin_operation(host)
     hub = request.app.state.hub
     ok = await host.start()
     hub.attach_timeline()
@@ -198,6 +214,7 @@ async def start_runtime(request: Request) -> dict[str, Any]:
 async def quit_app(request: Request) -> dict[str, Any]:
     """停掉 Runtime 并让整个 WebUI 进程退出。"""
     host = get_host(request)
+    _ensure_no_admin_operation(host)
     server = getattr(request.app.state, "server", None)
     host.request_stop()
     if server is not None:

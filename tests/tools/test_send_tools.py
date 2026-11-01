@@ -331,3 +331,80 @@ async def test_send_group_image_is_workspace_or_url_not_emoji(tmp_path):
     assert result["sent"][0]["content"] == "[图片: incoming/a.png]"
     assert adapter.sent == []
     assert adapter.sent_images[0]["image_path"] == image_path
+
+
+@pytest.mark.asyncio
+async def test_send_group_can_send_current_persona_appearance(tmp_path):
+    image = tmp_path / "appearance.png"
+    image.write_bytes(b"not-read-by-send-tool")
+
+    class FakeImageStore:
+        def resolve(self, name: str, image_id: str | None = None):
+            assert name == "alice"
+            assert image_id == "a_0123456789abcdef"
+            return image
+
+    cfg = _make_config()
+    reg = build_default_registry(cfg)
+    adapter = FakeSendAdapter()
+    ctx = ToolContext(
+        emoji_dir=tmp_path / "emoji",
+        adapter=adapter,
+        extras={
+            "persona_image_store": FakeImageStore(),
+            "persona_name": "alice",
+        },
+    )
+    executor = reg.get_executor(ctx)
+
+    result = await executor(
+        "send_group_message",
+        {
+            "group_id": 100,
+            "targets": [{
+                "image": "persona-image:alice:a_0123456789abcdef",
+                "order": 1,
+                "delay": 0,
+            }],
+        },
+    )
+
+    assert result["ok"] is True
+    assert adapter.sent_images[0]["image_path"] == image
+    assert result["sent"][0]["content"] == "[角色形象: a_0123456789abcdef]"
+
+
+@pytest.mark.asyncio
+async def test_send_group_rejects_other_persona_appearance(tmp_path):
+    class FakeImageStore:
+        def resolve(self, name: str, image_id: str | None = None):
+            raise AssertionError("不应解析其他人格形象")
+
+    cfg = _make_config()
+    reg = build_default_registry(cfg)
+    adapter = FakeSendAdapter()
+    ctx = ToolContext(
+        emoji_dir=tmp_path / "emoji",
+        adapter=adapter,
+        extras={
+            "persona_image_store": FakeImageStore(),
+            "persona_name": "alice",
+        },
+    )
+    executor = reg.get_executor(ctx)
+
+    result = await executor(
+        "send_group_message",
+        {
+            "group_id": 100,
+            "targets": [{
+                "image": "persona-image:bob:a_0123456789abcdef",
+                "order": 1,
+                "delay": 0,
+            }],
+        },
+    )
+
+    assert result["count"] == 0
+    assert "当前人格" in str(result.get("errors"))
+    assert adapter.sent_images == []

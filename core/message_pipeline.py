@@ -85,6 +85,7 @@ from .agent_task_helpers import (
     _resolve_agent_workspace_path as _resolve_agent_workspace_path,
 )
 from .chat_timeline import ChatTimelineStore
+from .group_chat_selection import GroupChatSelection
 from .media_pipeline import MediaPipelineMixin
 from .pipeline_agent_tasks import PipelineAgentTasksMixin
 from .pipeline_context import (
@@ -212,12 +213,14 @@ class MessagePipeline(
         summary_agent: SummaryAgent | None = None,
         model_context_length: int | None = None,
         vision: IVisionService | None = None,
+        main_vision: IVisionService | None = None,
         web_search: IWebSearchService | None = None,
         web_fetch: Any = None,
         weather: IWeatherService | None = None,
         container: Any = None,
         slang_service: Any = None,
         knowledge_service: Any = None,
+        persona_image_store: Any = None,
         asr: Any = None,
         tts: Any = None,
         rag_memory: Any = None,
@@ -265,12 +268,14 @@ class MessagePipeline(
         self.summary_agent = summary_agent
         self.model_context_length = model_context_length
         self.vision = vision
+        self.main_vision = main_vision
         self.web_search = web_search
         self.web_fetch = web_fetch
         self.weather = weather
         self.container = container
         self.slang_service = slang_service
         self.knowledge_service = knowledge_service
+        self.persona_image_store = persona_image_store
         self.asr = asr
         self.tts = tts
         self.rag_memory = rag_memory
@@ -320,6 +325,12 @@ class MessagePipeline(
         self.batch = MessageBatch()
         self.reply_lock = asyncio.Lock()
         self._batch_task: asyncio.Task | None = None
+        # 「工作」期间缓存 @/私聊，退出工作状态后统一交给主模型。
+        self._work_pending: list[PendingMessageItem] = []
+        self._work_lock = asyncio.Lock()
+        self._work_watch_task: asyncio.Task | None = None
+        # 群聊「聊天选择」：只影响群入站，私聊始终保留。
+        self.group_chat_selection = GroupChatSelection()
         # 退出 _batch_loop 后的兜底 task；保留引用避免 GC
         self._requeue_task: asyncio.Task | None = None
         self._summary_task: asyncio.Task | None = None
@@ -382,6 +393,12 @@ class MessagePipeline(
         self.blacklist = blacklist
         self._sync_blacklist()
 
+    def apply_whitelist(self, whitelist: WhitelistConfig) -> None:
+        """热更新白名单模式与名单；黑名单仍优先拦截。"""
+        self.whitelist = whitelist
+        self._whitelist_qq_ids = {int(x) for x in whitelist.qq_ids}
+        self._whitelist_group_ids = {int(x) for x in whitelist.group_ids}
+
     def mark_activity(self) -> None:
         """刷新活动时间。主动思考只在足够空闲后触发。"""
         self.last_activity_at = time.monotonic()
@@ -433,11 +450,17 @@ class MessagePipeline(
         now = get_time()
         user_record = self._build_user_record(items, now)
         conversation_id = user_record.get("conversation_id") or "legacy:unknown"
-        resting_before_main = await self._should_buffer_inbound_for_resting_persona()
-        if resting_before_main:
+        working_before_main = await self._should_buffer_inbound_for_working_persona()
+        resting_before_main = (
+            False if working_before_main
+            else await self._should_buffer_inbound_for_resting_persona()
+        )
+        if working_before_main or resting_before_main:
             metadata = user_record.setdefault("metadata", {})
             if isinstance(metadata, dict):
-                metadata["suppressed_reason"] = "persona_resting"
+                metadata["suppressed_reason"] = (
+                    "persona_working" if working_before_main else "persona_resting"
+                )
         stage_t0 = time.monotonic()
         await self.history.add_records([user_record], conversation_id=conversation_id)
         _log_slow_batch_stage("history_add_user", stage_t0, conversation_id=conversation_id)
@@ -452,6 +475,13 @@ class MessagePipeline(
                 except Exception:  # noqa: BLE001 - 黑话学习不能影响主消息
                     logger.debug("黑话窗口入队失败", exc_info=True)
         logger.info(f"合并处理 {len(items)} 条消息")
+        if working_before_main:
+            logger.info(
+                "人格工作中，跳过普通入站批次主模型调用 conversation_id=%s items=%s",
+                conversation_id,
+                len(items),
+            )
+            return False
         if resting_before_main:
             logger.info(
                 "人格休息中，跳过普通入站批次主模型调用 conversation_id=%s items=%s",
@@ -785,6 +815,7 @@ class MessagePipeline(
             self._batch_task,
             self._requeue_task,
             self._summary_task,
+            getattr(self, "_work_watch_task", None),
         ]
         for task in tasks:
             if task and not task.done():

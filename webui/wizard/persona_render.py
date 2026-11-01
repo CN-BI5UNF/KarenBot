@@ -37,6 +37,27 @@ def admin_entries_from_brief(brief: PersonaBrief | None) -> list[dict[str, objec
     return admin_entries(brief.admin_qq, brief.admin_name)
 
 
+def render_prompt_literal(text: str) -> str:
+    """Render a readable Python string literal while preserving the exact text.
+
+    Triple quotes keep real newlines in the saved persona file, so the WebUI
+    preview no longer shows a wall of ``\\n`` escapes. Backslashes still need
+    escaping; a delimiter that occurs in the prompt falls back to the other
+    triple-quote style, and the pathological both-delimiter case escapes only
+    the triple quotes instead of returning to ``repr``.
+    """
+    value = str(text or "")
+    escaped = value.replace("\\", "\\\\")
+    if '"""' not in value and not value.endswith('"'):
+        return f'"""{escaped}"""'
+    if "'''" not in value and not value.endswith("'"):
+        return "'''" + escaped + "'''"
+    escaped = escaped.replace('"""', '\\"\\"\\"')
+    if value.endswith('"') and not escaped.endswith('\\"'):
+        escaped = escaped[:-1] + '\\"'
+    return f'"""{escaped}"""'
+
+
 def render_persona_file(
     name: str,
     xml: str,
@@ -47,12 +68,11 @@ def render_persona_file(
     age: int | None = None,
     extra_vars: dict[str, Any] | None = None,
 ) -> str:
-    """Render a persona file with lossless string serialization.
+    """Render a persona file with readable, lossless prompt serialization.
 
-    ``repr()`` is used instead of triple-quoted literals: direct-prompt mode may
-    contain backslashes, quotes, newlines, or ``'''`` and must round-trip
-    byte-for-byte through the loader.  ``PERSONA_VARS`` stays a normal Python
-    dict so existing persona files keep working.
+    Triple-quoted literals keep the saved prompt readable in the WebUI source
+    preview while newlines, backslashes and quotes still round-trip through the
+    loader. ``PERSONA_VARS`` stays a normal Python dict.
     """
     persona_vars: dict[str, Any] = dict(extra_vars or {})
     persona_vars["name"] = (display_name or "").strip() or name
@@ -63,7 +83,7 @@ def render_persona_file(
         persona_vars["age"] = int(age)
     return (
         '"""人格档案（支持直接编写的长提示词）。"""\n\n'
-        f"PERSONA_PROMPT = {repr(xml)}\n\n"
+        f"PERSONA_PROMPT = {render_prompt_literal(xml)}\n\n"
         f"PERSONA_VARS = {format_python_literal(persona_vars)}\n"
     )
 
@@ -100,4 +120,5 @@ __all__ = [
     "format_python_literal",
     "render_minimal_persona",
     "render_persona_file",
+    "render_prompt_literal",
 ]

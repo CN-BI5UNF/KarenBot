@@ -40,7 +40,8 @@ logger = logging.getLogger(__name__)
 @tool(
     name="describe_image",
     description=(
-        "理解图片内容。传入图片 URL、已存在 workspace 路径或 data URL，"
+        "理解图片内容。传入图片 URL、已存在 workspace 路径、data URL，"
+        "或知识库角色形象条目里的 persona-image:<当前人格>[:<image_id>] 引用，"
         "返回图片的文字描述。主模型已原生附图时优先直接看图，只有需要额外专门"
         "分析时才调用本工具。没有真实图片块/路径/URL 时不要凭文件名猜画面。"
         "不要根据 msg_id 猜 incoming/img_*.jpg。"
@@ -51,7 +52,8 @@ logger = logging.getLogger(__name__)
     feature="vision",
 )
 async def describe_image(args: DescribeImageArgs, ctx: ToolContext) -> dict:
-    if ctx.vision is None:
+    vision = ctx.vision or ctx.main_vision
+    if vision is None:
         ctx.extras["vision_unavailable_this_turn"] = "未启用图像理解功能"
         return {
             "ok": False,
@@ -63,7 +65,7 @@ async def describe_image(args: DescribeImageArgs, ctx: ToolContext) -> dict:
     try:
         image_url = await _normalize_image_input(args.image_url, ctx)
         question = (args.question or args.prompt or "").strip()
-        raw = await ctx.vision.describe(image_url, question)
+        raw = await vision.describe(image_url, question)
     except ImageInputError as e:
         short_error = str(e)
         ctx.extras["vision_unavailable_this_turn"] = short_error
@@ -134,6 +136,31 @@ async def _normalize_image_input(image_url: str, ctx: ToolContext) -> str:
     if not value:
         raise ImageInputError("图片引用为空")
     from features.vision.image_assets import ImageAssetError, prepare_image_data_url
+
+    if value.lower().startswith("persona-image:"):
+        from core.persona_image import parse_persona_image_ref
+
+        store = ctx.extras.get("persona_image_store")
+        current = str(ctx.extras.get("persona_name") or "").strip()
+        try:
+            parsed = parse_persona_image_ref(value)
+        except Exception as exc:  # noqa: BLE001 - safe parser message
+            raise ImageInputError(str(exc)) from None
+        if parsed is None:
+            raise ImageInputError("角色形象引用格式无效")
+        name, image_id = parsed
+        if store is None:
+            raise ImageInputError("角色形象功能未就绪")
+        if not current or name != current:
+            raise ImageInputError("只能访问当前人格的角色形象")
+        try:
+            path = store.resolve(name, image_id)
+        except Exception as exc:  # noqa: BLE001 - safe resolver message
+            raise ImageInputError(str(exc)) from None
+        try:
+            return await prepare_image_data_url(path, trusted_local=True)
+        except ImageAssetError as exc:
+            raise ImageInputError(exc.safe_message()) from None
 
     if value.lower().startswith(("data:", "http://", "https://")):
         try:

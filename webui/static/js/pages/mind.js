@@ -38,10 +38,17 @@ export async function render(container, ctx) {
     }
     const s = data.state || {};
     const phys = data.physiology || {};
+    const actionLabels = {
+      awake: '清醒',
+      sleeping: '睡眠中',
+      eating: '进食中',
+      collapsing: '体力崩溃',
+      working: '专注工作中',
+    };
     const cards = [
       statCard('当前心情', s.mood != null ? Number(s.mood).toFixed(2) : '—'),
       statCard('社交需求', s.social_need != null ? Number(s.social_need).toFixed(2) : '—'),
-      statCard('当前动作', s.current_action || '空闲'),
+      statCard('当前动作', actionLabels[s.current_action] || s.current_action || '空闲'),
       statCard('年龄', data.age && data.age.effective != null ? String(data.age.effective) : '—'),
     ];
     if (phys.energy_mode && phys.energy_mode !== 'off') {

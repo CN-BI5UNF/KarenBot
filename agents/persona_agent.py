@@ -273,6 +273,8 @@ from .persona_context_view import PersonaContextView
 logger = logging.getLogger(__name__)
 
 _RESTING_ACTIONS = {"sleeping", "eating", "collapsing"}
+_WORKING_ACTION = "working"
+_ENGAGED_ACTIONS = _RESTING_ACTIONS | {_WORKING_ACTION}
 
 _SOCIAL_NEED_GUIDANCE = (
     "social_need 表示社交未满足度，不是亲密度、兴奋度或想继续聊天的程度："
@@ -467,6 +469,13 @@ class PersonaAgent:
         action_until = _optional_float(self._state.action_until)
         return action_until is not None and action_until > time.time()
 
+    def is_working(self) -> bool:
+        """当前是否处于模型自主「工作」状态。"""
+        if self._state.current_action != _WORKING_ACTION:
+            return False
+        action_until = _optional_float(self._state.action_until)
+        return action_until is not None and action_until > time.time()
+
     @property
     def physiology_energy_mode(self) -> str:
         return self._energy_mode()
@@ -487,17 +496,23 @@ class PersonaAgent:
         fallback = False
         try:
             async with self._state_lock:
-                if self.is_resting():
+                if self.is_resting() or self.is_working():
+                    skip_reason = "persona_working" if self.is_working() else "persona_resting"
                     await self._append_state_log_locked(
                         {
                             "event": "after_turn",
                             "conversation_id": conversation_id,
                             "skipped": True,
-                            "skip_reason": "persona_resting",
+                            "skip_reason": skip_reason,
                         }
                     )
                     await self._save_state_locked()
-                    self._emit_status("idle", "人格休息中，跳过普通状态更新")
+                    self._emit_status(
+                        "idle",
+                        "人格工作中，跳过普通状态更新"
+                        if skip_reason == "persona_working"
+                        else "人格休息中，跳过普通状态更新",
+                    )
                     return
                 update = await self._llm_turn_update(
                     conversation_id,
@@ -641,6 +656,70 @@ class PersonaAgent:
             "action_until": action_until,
             "record_id": self._active_sleep_record_id,
         }
+
+    async def on_work_start(
+        self,
+        duration_minutes: float,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """进入模型自主「工作」状态。
+
+        工作期间不恢复精力，时间到后自动回到 awake；入站 @/私聊由
+        MessagePipeline 暂存，并在退出工作状态后统一交给主模型。
+        """
+        if self.is_resting():
+            return {"status": "resting", "message": "人格正在睡眠或进食，无法开始工作"}
+        maximum = _read_number(
+            self.pm_cfg,
+            "physiology",
+            "work",
+            "max_minutes",
+            default=240,
+        )
+        if maximum <= 0:
+            return {"status": "disabled", "message": "人格工作状态已禁用"}
+
+        now = time.time()
+        duration = max(1.0, _bounded_duration(duration_minutes, maximum))
+        action_until = now + duration * 60.0
+        async with self._state_lock:
+            await self._settle_current_action_for_replacement_locked(now)
+            self._state.current_action = _WORKING_ACTION
+            self._state.action_until = action_until
+            self._state.last_tick_at = now
+            await self._append_state_log_locked(
+                {
+                    "event": "work_start",
+                    "started_at": now,
+                    "planned_duration_minutes": duration,
+                    "action_until": action_until,
+                    "reason": str(reason or ""),
+                }
+            )
+            await self._save_state_locked()
+
+        return {
+            "status": "started",
+            "duration_minutes": duration,
+            "action_until": action_until,
+            "reason": str(reason or ""),
+            "message": "已进入工作状态；期间的 @ 和私聊会暂存到工作结束。",
+        }
+
+    async def on_work_end(self, reason: str = "finished") -> dict[str, Any]:
+        """结束工作状态；到时由 pipeline 主动结算，避免状态滞后到下一次维护。"""
+        now = time.time()
+        async with self._state_lock:
+            if self._state.current_action != _WORKING_ACTION:
+                return {"status": "idle"}
+            self._state.current_action = "awake"
+            self._state.action_until = None
+            self._state.last_tick_at = now
+            await self._append_state_log_locked(
+                {"event": "work_end", "reason": str(reason or "finished"), "ended_at": now}
+            )
+            await self._save_state_locked()
+        return {"status": "ended", "reason": str(reason or "finished")}
 
     async def on_wakeup(self, reason: str) -> PersonaState:
         """从睡眠或休息状态醒来，并按实际睡眠时间恢复基础精力。"""
@@ -1442,7 +1521,7 @@ class PersonaAgent:
             last_tick_at = state.last_tick_at
             action_until = _optional_float(state.action_until)
             if (
-                state.current_action in _RESTING_ACTIONS
+                state.current_action in _ENGAGED_ACTIONS
                 and action_until is not None
                 and action_until <= last_tick_at
                 and action_until <= now
@@ -1459,7 +1538,7 @@ class PersonaAgent:
                     satiety_mode,
                 )
             elif (
-                state.current_action in _RESTING_ACTIONS
+                state.current_action in _ENGAGED_ACTIONS
                 and action_until is not None
                 and last_tick_at < action_until < now
             ):
@@ -1495,12 +1574,12 @@ class PersonaAgent:
                 )
 
             self._refresh_energy_critical_since(now)
-            is_resting = (
-                state.current_action in _RESTING_ACTIONS
+            is_engaged = (
+                state.current_action in _ENGAGED_ACTIONS
                 and not _action_until_expired(state.action_until, now)
             )
             if (
-                not is_resting
+                not is_engaged
                 and allow_collapse
                 and finished_action != "collapsing"
                 and self._should_collapse(now)
@@ -1602,7 +1681,7 @@ class PersonaAgent:
     ) -> str | None:
         if not _action_until_expired(self._state.action_until, now):
             return None
-        if self._state.current_action not in _RESTING_ACTIONS:
+        if self._state.current_action not in _ENGAGED_ACTIONS:
             return None
         previous = self._state.current_action
         self._state.current_action = "awake"

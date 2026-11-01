@@ -375,6 +375,10 @@ def test_save_raw_prompt_round_trips_arbitrary_text(persona_root):
     assert result["created"] is True
     assert result["size"] == len(content)
     text = (persona_root.PERSONAS_DIR / "小晚" / "persona_prompt.py").read_text("utf-8")
+    prompt_literal = text.split("PERSONA_PROMPT = ", 1)[1].split("\n\nPERSONA_VARS", 1)[0]
+    assert prompt_literal.startswith('"""')
+    assert "\\n" not in prompt_literal
+    assert "第一行\n第二行" in prompt_literal
     assert pa.extract_prompt_source(text) == content
     variables = pa.extract_persona_vars(text)
     assert variables["name"] == "小晚"

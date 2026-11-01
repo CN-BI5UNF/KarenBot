@@ -84,6 +84,30 @@ async def container_storage_setup(
         raise _http_error(exc) from exc
 
 
+@router.get("/files")
+async def container_files(
+    request: Request,
+    path: str = "/workspace",
+) -> dict[str, Any]:
+    service = _service(request)
+    try:
+        return await service.browse_files(path)
+    except ContainerError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/files/content")
+async def container_file_content(
+    request: Request,
+    path: str = "",
+) -> dict[str, Any]:
+    service = _service(request)
+    try:
+        return await service.preview_file(path)
+    except ContainerError as exc:
+        raise _http_error(exc) from exc
+
+
 @router.post("/test")
 async def container_test(request: Request) -> dict[str, Any]:
     service = _service(request)

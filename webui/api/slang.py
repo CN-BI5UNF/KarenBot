@@ -1,7 +1,8 @@
 """群聊黑话 / 网络热梗管理 API。
 
 学习候选与确认状态由 Runtime 的 SlangService 管理；WebUI 只做管理端操作。
-模型侧只会看到 confirmed + meaning 的词条，evidence/sources 仅管理端可见。
+同群黑话由所有人格共享；模型侧只会看到 confirmed + meaning 的词条，
+evidence/sources 仅管理端可见。
 """
 
 from __future__ import annotations
@@ -46,16 +47,19 @@ async def list_slang(
     request: Request,
     conversation_id: str = "",
     status: str = "",
+    q: str = "",
 ) -> dict[str, Any]:
     service = _service(request)
     if conversation_id:
         _conversation(conversation_id)
+    query = str(q or "").strip()[:100]
     entries = service.list_entries(
         conversation_id=conversation_id,
         status=status,
         limit=1000,
+        query=query,
     )
-    stats = service.stats()
+    stats = service.stats(conversation_id=conversation_id, query=query)
     conversations = service.conversations()
     buffers = {
         item: service.buffer_size(item)
@@ -66,7 +70,10 @@ async def list_slang(
     return {
         "ok": True,
         "persona_id": service.persona_id,
+        "shared_across_personas": True,
         "entries": entries,
+        "matched": len(entries),
+        "query": query,
         "stats": stats,
         "conversations": conversations,
         "buffers": buffers,

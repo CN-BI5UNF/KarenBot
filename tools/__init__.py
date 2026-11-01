@@ -10,8 +10,8 @@
                            set_*_add_request / summarize_chat_history /
                            summarize_conversation / recall_history
     agent_task_tools    —— start_agent_task 后台子 Agent 资料处理
-    control_tools       —— no_action / schedule_wakeup
-    persona_tools       —— eat / sleep 人格生理状态工具
+    control_tools       —— no_action / schedule_wakeup / chat_selection
+    persona_tools       —— eat / sleep / work 人格状态工具
     feature_tools       —— describe_image / web_search / get_weather
 
 公开 API：
@@ -181,6 +181,8 @@ FULL_SCHEMA_TOOLS: set[str] = {
     "list_knowledge_notes",
     "eat",
     "sleep",
+    "work",
+    "chat_selection",
 }
 """常驻完整 schema 工具（full profile 回滚用）。"""
 
@@ -200,6 +202,7 @@ COMPACT_SCHEMA_TOOLS: set[str] = {
     "list_knowledge_notes",
     "tool_search",
     "container",
+    "work",
 }
 """compact profile 下直接暴露核心字段的工具。
 
@@ -223,6 +226,7 @@ _COMPACT_SHORT_DESCRIPTIONS: dict[str, str] = {
     "lookup_slang": "查询当前群已确认的黑话/缩写/群梗。",
     "list_knowledge_notes": "按需查询知识库中的热梗/事实笔记。",
     "tool_search": "查询低频工具的参数摘要、完整 schema 和风险约束。",
+    "work": "进入自主工作状态；期间暂存 @/私聊，到时自动退出。",
 }
 
 
@@ -296,17 +300,17 @@ schema，不走 tool_search，否则模型要为了查一条知识多花一轮�
 
 
 _STUB_SHORT_DESCRIPTIONS: dict[str, str] = {
-    "start_agent_task": "低频资料整理工具。先用 tool_search 查询参数摘要；需要完整 schema 时 detail=full。",
+    "start_agent_task": "资料整理。先用 tool_search。",
     "summarize_chat_history": "低频群历史总结工具。先用 tool_search 查询参数摘要；需要完整 schema 时 detail=full。",
     "summarize_conversation": "低频本地会话总结工具。先用 tool_search 查询参数摘要；需要完整 schema 时 detail=full。",
     "filter_archive_records": "低频归档筛选工具。先用 tool_search 查询参数摘要；需要完整 schema 时 detail=full。",
     "recall_history": "低频归档检索工具。先用 tool_search 查询参数摘要；需要完整 schema 时 detail=full。",
-    "upload_file": "文件发送工具。先用 tool_search 查询参数摘要和约束；需要完整 schema 时 detail=full。",
-    "send_voice_message": "语音发送工具。先用 tool_search 查询参数摘要；需要完整 schema 时 detail=full。",
-    "set_group_kick": "高风险群管理工具。先用 tool_search 查询参数摘要和约束；需要完整 schema 时 detail=full。",
-    "set_group_ban": "高风险群管理工具。先用 tool_search 查询参数摘要和约束；需要完整 schema 时 detail=full。",
-    "set_group_whole_ban": "高风险群管理工具。先用 tool_search 查询参数摘要和约束；需要完整 schema 时 detail=full。",
-    "set_group_leave": "高风险群管理工具。先用 tool_search 查询参数摘要和约束；需要完整 schema 时 detail=full。",
+    "upload_file": "文件发送。先用 tool_search。",
+    "send_voice_message": "语音发送。先用 tool_search。",
+    "set_group_kick": "高风险群管理。调用前先用 tool_search。",
+    "set_group_ban": "高风险群管理。调用前先用 tool_search。",
+    "set_group_whole_ban": "高风险群管理。调用前先用 tool_search。",
+    "set_group_leave": "高风险群管理。调用前先用 tool_search。",
     "schedule_wakeup": "定时唤醒/定时发送工具。先用 tool_search 查询参数摘要。",
     "read_file": "读取 workspace 文件（分页）。先用 tool_search 查询参数摘要。",
     "write_file": "覆盖写入 workspace 文件。先用 tool_search 查询参数摘要。",
@@ -335,7 +339,8 @@ _STUB_SHORT_DESCRIPTIONS: dict[str, str] = {
     "save_knowledge_note": "保存已核对的知识/热梗笔记。先用 tool_search 查询参数摘要。",
     "research_web_to_prompt": "联网考究并整理成知识笔记。先用 tool_search 查询参数摘要。",
     "delete_knowledge_note": "删除知识笔记。先用 tool_search 查询参数摘要。",
-    "web_fetch": "读取单个网页正文（官方 Fetch）。先用 tool_search 查询参数摘要。",
+    "web_fetch": "读取网页正文。先用 tool_search。",
+    "chat_selection": "群聊接收控制。先用 tool_search。",
 }
 
 
@@ -406,6 +411,8 @@ def build_default_registry(config) -> ToolRegistry:
             mode_name, required_mode = _PERSONA_CONDITIONAL_TOOLS[spec.name]
             if not persona_enabled or persona_modes[mode_name] != required_mode:
                 continue
+        if spec.name == "work" and not persona_enabled:
+            continue
         if spec.name == "container" and not container_enabled:
             continue
 

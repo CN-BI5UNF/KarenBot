@@ -50,6 +50,31 @@ async def test_describe_image_without_vision_service():
 
 
 @pytest.mark.asyncio
+async def test_describe_image_uses_main_model_vision_fallback():
+    """独立视觉服务关闭时，主模型原生图片输入可兜底 describe_image。"""
+
+    class FakeVision:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        async def describe(self, image_url: str, prompt: str = "") -> str:
+            self.calls.append((image_url, prompt))
+            return "fallback-ok"
+
+    cfg = _make_config(vision_enabled=True)
+    reg = build_default_registry(cfg)
+    fallback = FakeVision()
+    executor = reg.get_executor(ToolContext(main_vision=fallback))
+    result = await executor(
+        "describe_image",
+        {"image_url": _data_url(), "question": "图里是什么"},
+    )
+
+    assert result["ok"] is True
+    assert fallback.calls and fallback.calls[0][1] == "图里是什么"
+
+
+@pytest.mark.asyncio
 async def test_describe_image_accepts_workspace_path(tmp_path):
     class FakeVision:
         def __init__(self) -> None:
@@ -317,6 +342,72 @@ async def test_describe_image_failure_result_is_compact(monkeypatch):
     assert "Request id" not in dumped
     assert "vision_volcengine" not in dumped
     assert "InvalidParameter" not in dumped
+
+
+@pytest.mark.asyncio
+async def test_describe_image_accepts_current_persona_image_reference(tmp_path):
+    class FakeVision:
+        def __init__(self) -> None:
+            self.image_url = ""
+
+        async def describe(self, image_url: str, prompt: str = "") -> str:
+            self.image_url = image_url
+            return "一只蓝白色的角色"
+
+    class FakeImageStore:
+        def __init__(self, path) -> None:
+            self.path = path
+
+        def resolve(self, name: str, image_id: str | None = None):
+            if name != "alice":
+                raise ValueError("人格不存在")
+            if image_id not in {None, "a_0123456789abcdef"}:
+                raise ValueError("角色形象不存在")
+            return self.path
+
+    image = tmp_path / "appearance.png"
+    _write_png(image)
+    cfg = _make_config(vision_enabled=True)
+    reg = build_default_registry(cfg)
+    vision = FakeVision()
+    ctx = ToolContext(
+        vision=vision,
+        extras={
+            "persona_image_store": FakeImageStore(image),
+            "persona_name": "alice",
+        },
+    )
+    executor = reg.get_executor(ctx)
+    result = await executor(
+        "describe_image",
+        {"image_url": "persona-image:alice:a_0123456789abcdef", "question": "她长什么样"},
+    )
+
+    assert result["ok"] is True
+    assert vision.image_url.startswith("data:image/png;base64,")
+    assert result["description"] == "一只蓝白色的角色"
+
+
+@pytest.mark.asyncio
+async def test_describe_image_rejects_other_persona_image_reference(tmp_path):
+    class FakeVision:
+        async def describe(self, image_url: str, prompt: str = "") -> str:
+            raise AssertionError("跨人格形象不应调用视觉 provider")
+
+    cfg = _make_config(vision_enabled=True)
+    reg = build_default_registry(cfg)
+    ctx = ToolContext(
+        vision=FakeVision(),
+        extras={"persona_image_store": object(), "persona_name": "alice"},
+    )
+    executor = reg.get_executor(ctx)
+    result = await executor(
+        "describe_image",
+        {"image_url": "persona-image:bob"},
+    )
+
+    assert result["ok"] is False
+    assert "当前人格" in result["error"]
 
 
 @pytest.mark.asyncio

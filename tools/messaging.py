@@ -192,6 +192,8 @@ async def send_private_messages(args: SendPrivateArgs, ctx: ToolContext) -> dict
                 ctx.emoji_dir,
                 ctx.workspace_dir,
                 face=t.face,
+                persona_image_store=ctx.extras.get("persona_image_store"),
+                persona_name=str(ctx.extras.get("persona_name") or ""),
             )
         except MessageBuildError as e:
             errors.append(
@@ -303,6 +305,8 @@ async def send_group_message(args: SendGroupArgs, ctx: ToolContext) -> dict:
                 ctx.emoji_dir,
                 ctx.workspace_dir,
                 face=t.face,
+                persona_image_store=ctx.extras.get("persona_image_store"),
+                persona_name=str(ctx.extras.get("persona_name") or ""),
             )
         except MessageBuildError as e:
             errors.append(str(e))

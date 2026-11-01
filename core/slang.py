@@ -7,7 +7,7 @@
 * 候选默认 ``candidate``，必须由管理员补全释义并确认；
 * 只有 ``confirmed`` 且 meaning 非空的词条才能被 ``lookup_slang`` 查询；
 * 黑话表不再自动注入主模型 prompt，模型需要时按当前会话查询；
-* 词条按 persona + conversation_id 隔离，避免跨群泄漏；
+* 词条按 conversation_id 分组，同群所有 persona 共享，避免跨群泄漏；
 * 证据、来源只给管理端看，工具结果只包含词条/释义/用法/例句/风险。
 
 这里不自动执行群聊文本里的任何指令；提取 prompt 明确把聊天记录当作不可信语料。
@@ -42,6 +42,8 @@ MAX_FIELD = 300
 MAX_SOURCES = 10
 MAX_EVIDENCE = 20
 MAX_EVIDENCE_TEXT = 80
+DUPLICATE_REJECTION_CODE = "duplicate_term"
+DUPLICATE_REJECTION_REASON = "同群已有同名词条，本次 AI 申请已自动拒绝"
 _MAX_MODEL_INPUT = 80_000
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _ROLE_CONTROL_RE = re.compile(
@@ -132,6 +134,8 @@ def _normalize_entry(raw: dict[str, Any]) -> dict[str, Any] | None:
         "source": _clip(raw.get("source") or "ai", 20) or "ai",
         "count": count,
         "evidence": _dedupe_evidence(evidence if isinstance(evidence, list) else []),
+        "rejection_code": _clip(raw.get("rejection_code"), 40),
+        "rejection_reason": _clip(raw.get("rejection_reason"), MAX_FIELD),
         "created_at": _clip(raw.get("created_at"), 40) or _now_iso(),
         "updated_at": _clip(raw.get("updated_at"), 40) or _now_iso(),
     }
@@ -143,6 +147,19 @@ def _sort_key(entry: dict[str, Any]) -> tuple[int, int, str]:
         rank.get(str(entry.get("status")), 3),
         -int(entry.get("count") or 0),
         str(entry.get("updated_at") or ""),
+    )
+
+
+def _is_duplicate_rejection(entry: dict[str, Any]) -> bool:
+    return str(entry.get("rejection_code") or "") == DUPLICATE_REJECTION_CODE
+
+
+def _matches_query(entry: dict[str, Any], needle: str) -> bool:
+    if not needle:
+        return True
+    return any(
+        needle in str(entry.get(key) or "").casefold()
+        for key in ("content", "meaning", "usage", "example", "risk", "rejection_reason")
     )
 
 
@@ -220,24 +237,46 @@ class SlangStore:
         conversation_id: str = "",
         status: str = "",
         limit: int = 1000,
+        include_other_personas: bool = False,
+        query: str = "",
     ) -> list[dict[str, Any]]:
+        needle = _clip(query, 100).casefold()
         with self._lock:
             items = [
                 dict(item)
                 for item in self._entries
-                if (not persona_id or item.get("persona_id") == persona_id)
+                if (
+                    not persona_id
+                    or item.get("persona_id") == persona_id
+                    or include_other_personas
+                )
                 and (not conversation_id or item.get("conversation_id") == conversation_id)
                 and (not status or item.get("status") == status)
+                and _matches_query(item, needle)
             ]
         items.sort(key=_sort_key)
         return items[: max(1, min(2000, int(limit)))]
 
-    def stats(self, *, persona_id: str = "") -> dict[str, Any]:
+    def stats(
+        self,
+        *,
+        persona_id: str = "",
+        include_other_personas: bool = False,
+        conversation_id: str = "",
+        query: str = "",
+    ) -> dict[str, Any]:
+        needle = _clip(query, 100).casefold()
         with self._lock:
             items = [
                 item
                 for item in self._entries
-                if not persona_id or item.get("persona_id") == persona_id
+                if (
+                    not persona_id
+                    or item.get("persona_id") == persona_id
+                    or include_other_personas
+                )
+                and (not conversation_id or item.get("conversation_id") == conversation_id)
+                and _matches_query(item, needle)
             ]
         counts = {status: 0 for status in SLANG_STATUSES}
         for item in items:
@@ -256,6 +295,154 @@ class SlangStore:
     def _find(self, entry_id: str) -> dict[str, Any] | None:
         return next((item for item in self._entries if item.get("id") == entry_id), None)
 
+    def _find_group_entry(
+        self, conversation_id: str, content: str, *, exclude_id: str = ""
+    ) -> dict[str, Any] | None:
+        """Slang is shared by every persona in the same group."""
+        return next(
+            (
+                item
+                for item in self._entries
+                if item.get("id") != exclude_id
+                and item.get("conversation_id") == conversation_id
+                and item.get("content") == content
+            ),
+            None,
+        )
+
+    def _find_group_active_entry(
+        self, conversation_id: str, content: str, *, exclude_id: str = ""
+    ) -> dict[str, Any] | None:
+        """Find a live (candidate/confirmed) entry, ignoring audit rejections."""
+        return next(
+            (
+                item
+                for item in self._entries
+                if item.get("id") != exclude_id
+                and item.get("conversation_id") == conversation_id
+                and item.get("content") == content
+                and item.get("status") != "rejected"
+            ),
+            None,
+        )
+
+    def _find_duplicate_rejection(
+        self, conversation_id: str, content: str
+    ) -> dict[str, Any] | None:
+        return next(
+            (
+                item
+                for item in self._entries
+                if _is_duplicate_rejection(item)
+                and item.get("conversation_id") == conversation_id
+                and item.get("content") == content
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _merge_group_entries(items: list[dict[str, Any]]) -> dict[str, Any]:
+        """Merge legacy per-persona duplicates into one group-owned entry."""
+        ordered = sorted(items, key=_sort_key)
+        merged = dict(ordered[0])
+        for other in ordered[1:]:
+            for key in ("meaning", "usage", "example", "risk"):
+                if not merged.get(key) and other.get(key):
+                    merged[key] = other[key]
+            merged["count"] = int(merged.get("count") or 0) + int(
+                other.get("count") or 0
+            )
+            merged["evidence"] = _dedupe_evidence(
+                list(merged.get("evidence") or []) + list(other.get("evidence") or [])
+            )
+        sources: list[str] = []
+        for item in ordered:
+            for source in item.get("sources") or []:
+                if source and source not in sources:
+                    sources.append(source)
+        merged["sources"] = sources[:MAX_SOURCES]
+        created = [str(item.get("created_at") or "") for item in ordered]
+        updated = [str(item.get("updated_at") or "") for item in ordered]
+        if any(created):
+            merged["created_at"] = min(value for value in created if value)
+        if any(updated):
+            merged["updated_at"] = max(value for value in updated if value)
+        return merged
+
+    def _backup_before_merge_locked(self) -> bool:
+        if not self.path.is_file():
+            return True
+        backup = self.path.with_name(
+            f"{self.path.name}.shared-merge-{time.strftime('%Y%m%d-%H%M%S')}-"
+            f"{secrets.token_hex(3)}"
+        )
+        try:
+            raw = self.path.read_bytes()
+            fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(raw)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            logger.warning("黑话库合并前备份失败，保留原数据：%s", exc)
+            return False
+        return True
+
+    def compact_shared_duplicates(self) -> int:
+        """Merge legacy ``(group, content)`` duplicates across personas.
+
+        The old isolation model could create two entries for the same word in
+        the same group when different personas learned it. Confirmed entries
+        win; missing details, evidence and counts are combined. A backup is
+        written before the first write so the operation is reversible.
+        """
+        if not self.writable:
+            return 0
+        with self._lock:
+            groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            for item in self._entries:
+                conversation_id = str(item.get("conversation_id") or "")
+                if not conversation_id.startswith("group:"):
+                    continue
+                # Auto-rejected duplicate applications are audit-visible rows.
+                # Keep them separate from the canonical entry across restarts.
+                if _is_duplicate_rejection(item):
+                    continue
+                key = (conversation_id, str(item.get("content") or ""))
+                if key[1]:
+                    groups.setdefault(key, []).append(item)
+            duplicate_groups = [
+                items for items in groups.values() if len(items) > 1
+            ]
+            if not duplicate_groups:
+                return 0
+            if not self._backup_before_merge_locked():
+                return 0
+
+            removed = 0
+            replacements: dict[int, dict[str, Any]] = {}
+            absorbed: set[int] = set()
+            for items in duplicate_groups:
+                merged = self._merge_group_entries(items)
+                replacements[id(items[0])] = merged
+                for item in items:
+                    absorbed.add(id(item))
+                removed += len(items) - 1
+            compacted: list[dict[str, Any]] = []
+            emitted: set[int] = set()
+            for item in self._entries:
+                if id(item) not in absorbed:
+                    compacted.append(item)
+                    continue
+                # Emit the merged entry at the first duplicate's position;
+                # _save_locked still applies the global sort before writing.
+                if id(item) in replacements and id(item) not in emitted:
+                    compacted.append(replacements[id(item)])
+                    emitted.add(id(item))
+            self._entries = compacted
+            self._save_locked()
+            return removed
+
     def upsert_candidates(
         self,
         *,
@@ -264,7 +451,14 @@ class SlangStore:
         candidates: list[dict[str, Any]],
         evidence_by_content: dict[str, list[dict[str, Any]]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Insert/merge AI candidates; rejected entries are not reopened by AI."""
+        """Insert AI candidates; duplicate terms become visible rejected rows.
+
+        A model-generated candidate for an existing term is not merged into the
+        canonical row and does not overwrite its meaning.  It is kept as a
+        rejected ``duplicate_term`` record so admins can still see what the
+        model applied for, while only the canonical row remains queryable.
+        Manually rejected entries are never reopened by AI.
+        """
         evidence_by_content = evidence_by_content or {}
         changed: list[dict[str, Any]] = []
         now = _now_iso()
@@ -273,30 +467,46 @@ class SlangStore:
                 content = _clip(raw.get("content"), MAX_CONTENT)
                 if not content:
                     continue
-                existing = next(
-                    (
-                        item
-                        for item in self._entries
-                        if item.get("persona_id") == persona_id
-                        and item.get("conversation_id") == conversation_id
-                        and item.get("content") == content
-                    ),
-                    None,
+                active = self._find_group_active_entry(conversation_id, content)
+                existing = self._find_group_entry(conversation_id, content)
+                rejection = self._find_duplicate_rejection(
+                    conversation_id, content
                 )
-                if existing is not None:
-                    if existing.get("status") == "rejected":
-                        continue
-                    existing["count"] = int(existing.get("count") or 0) + 1
-                    for key in ("meaning", "usage", "example", "risk"):
-                        value = _clip(raw.get(key), MAX_FIELD)
-                        if value and not existing.get(key):
-                            existing[key] = value
-                    existing["evidence"] = _dedupe_evidence(
-                        list(existing.get("evidence") or [])
-                        + list(evidence_by_content.get(content) or [])
-                    )
-                    existing["updated_at"] = now
-                    changed.append(dict(existing))
+                if active is not None or existing is not None:
+                    if rejection is None:
+                        rejection = _normalize_entry(
+                            {
+                                "persona_id": persona_id,
+                                "conversation_id": conversation_id,
+                                "content": content,
+                                "meaning": raw.get("meaning"),
+                                "usage": raw.get("usage"),
+                                "example": raw.get("example"),
+                                "risk": raw.get("risk"),
+                                "status": "rejected",
+                                "source": "ai",
+                                "count": 1,
+                                "evidence": evidence_by_content.get(content) or [],
+                                "rejection_code": DUPLICATE_REJECTION_CODE,
+                                "rejection_reason": DUPLICATE_REJECTION_REASON,
+                                "created_at": now,
+                                "updated_at": now,
+                            }
+                        )
+                        assert rejection is not None
+                        self._entries.append(rejection)
+                    else:
+                        rejection["count"] = int(rejection.get("count") or 0) + 1
+                        for key in ("meaning", "usage", "example", "risk"):
+                            value = _clip(raw.get(key), MAX_FIELD)
+                            if value and not rejection.get(key):
+                                rejection[key] = value
+                        rejection["evidence"] = _dedupe_evidence(
+                            list(rejection.get("evidence") or [])
+                            + list(evidence_by_content.get(content) or [])
+                        )
+                        rejection["updated_at"] = now
+                    changed.append(dict(rejection))
                     continue
                 entry = _normalize_entry(
                     {
@@ -342,18 +552,9 @@ class SlangStore:
         if not conversation_id.startswith("group:"):
             raise ValueError("黑话按群聊隔离，conversation_id 必须是 group:<群号>")
         with self._lock:
-            existing = next(
-                (
-                    item
-                    for item in self._entries
-                    if item.get("persona_id") == persona_id
-                    and item.get("conversation_id") == conversation_id
-                    and item.get("content") == clean_content
-                ),
-                None,
-            )
+            existing = self._find_group_entry(conversation_id, clean_content)
             if existing is not None:
-                raise ValueError("这个群里已经有同名词条")
+                raise ValueError("这个群里已经有同名词条（同群所有人格共享）")
             entry = _normalize_entry(
                 {
                     "persona_id": persona_id,
@@ -393,19 +594,13 @@ class SlangStore:
                 content = _clip(updates["content"], MAX_CONTENT)
                 if not content:
                     raise ValueError("词条内容不能为空")
-                duplicate = next(
-                    (
-                        item
-                        for item in self._entries
-                        if item is not entry
-                        and item.get("persona_id") == entry.get("persona_id")
-                        and item.get("conversation_id") == entry.get("conversation_id")
-                        and item.get("content") == content
-                    ),
-                    None,
+                duplicate = self._find_group_entry(
+                    str(entry.get("conversation_id") or ""),
+                    content,
+                    exclude_id=str(entry.get("id") or ""),
                 )
                 if duplicate is not None:
-                    raise ValueError("同一个群里已经有同名词条")
+                    raise ValueError("同一个群里已经有同名词条（同群所有人格共享）")
                 updates["content"] = content
             for key in ("meaning", "usage", "example", "risk"):
                 if key in updates:
@@ -430,6 +625,24 @@ class SlangStore:
             candidate_meaning = str(updates.get("meaning", entry.get("meaning") or ""))
             if candidate_status == "confirmed" and not candidate_meaning.strip():
                 raise ValueError("确认词条前必须填写释义")
+            if candidate_status != "rejected":
+                effective_content = str(
+                    updates.get("content", entry.get("content") or "")
+                )
+                active_duplicate = self._find_group_active_entry(
+                    str(entry.get("conversation_id") or ""),
+                    effective_content,
+                    exclude_id=str(entry.get("id") or ""),
+                )
+                if active_duplicate is not None:
+                    raise ValueError("同群已有同名词条，不能重复设为有效")
+            if _is_duplicate_rejection(entry) and (
+                candidate_status != "rejected" or "content" in updates
+            ):
+                # The row is no longer a duplicate application once an admin
+                # changes its term or deliberately activates it.
+                updates["rejection_code"] = ""
+                updates["rejection_reason"] = ""
             entry.update(updates)
             entry["updated_at"] = _now_iso()
             self._save_locked()
@@ -451,13 +664,17 @@ class SlangStore:
         conversation_id: str,
         max_entries: int,
         max_chars: int,
+        include_other_personas: bool = False,
     ) -> str:
         """旧版整表文本；主对话已不再调用，仅供诊断/兼容测试。"""
         with self._lock:
             items = [
                 dict(item)
                 for item in self._entries
-                if item.get("persona_id") == persona_id
+                if (
+                    item.get("persona_id") == persona_id
+                    or include_other_personas
+                )
                 and item.get("conversation_id") == conversation_id
                 and item.get("status") == "confirmed"
                 and str(item.get("meaning") or "").strip()
@@ -589,7 +806,10 @@ class SlangLearner:
         return sorted(
             (set(self._windows) | {
                 str(item.get("conversation_id") or "")
-                for item in self.store.list_entries(persona_id=self.persona_id)
+                for item in self.store.list_entries(
+                    persona_id=self.persona_id,
+                    include_other_personas=True,
+                )
             }) - {""}
         )
 
@@ -663,10 +883,26 @@ class SlangLearner:
             remaining = [item for item in window if id(item) not in sent_ids]
             window.clear()
             window.extend(remaining)
+            new_candidates = sum(
+                1 for item in changed if item.get("status") == "candidate"
+            )
+            auto_rejected = sum(
+                1 for item in changed if _is_duplicate_rejection(item)
+            )
+            parts: list[str] = []
+            if new_candidates:
+                parts.append(f"提取到 {new_candidates} 个候选项")
+            if auto_rejected:
+                parts.append(f"{auto_rejected} 条重复申请已自动拒绝并保留记录")
+            if not parts:
+                parts.append("没有新的候选项")
             return {
                 "ok": True,
-                "candidates": len(changed),
-                "message": f"提取到 {len(changed)} 个候选项，等待管理员确认",
+                "candidates": new_candidates,
+                "auto_rejected": auto_rejected,
+                "message": "，".join(parts) + (
+                    "，等待管理员确认" if new_candidates else ""
+                ),
             }
 
     async def _extract(self, messages: list[dict[str, Any]]) -> list[Any] | None:
@@ -727,10 +963,10 @@ class SlangLearner:
 
 
 class SlangService:
-    """Runtime-facing facade: learning + per-conversation on-demand lookup.
+    """Runtime-facing facade: learning + per-group, cross-persona lookup.
 
     主对话不再自动注入黑话表；模型需要时调用 ``lookup_slang``，由
-    :meth:`lookup` 按当前群和上限返回。
+    :meth:`lookup` 按当前群和上限返回同群所有人格共享的词条。
     """
 
     def __init__(
@@ -745,6 +981,13 @@ class SlangService:
         self.persona_id = persona_id
         self.config = config
         self.store = SlangStore(Path(data_dir) / "slang.json")
+        try:
+            merged = self.store.compact_shared_duplicates()
+        except (OSError, RuntimeError) as exc:
+            logger.warning("黑话库跨人格去重失败，保留原数据：%s", exc)
+        else:
+            if merged:
+                logger.info("黑话库已合并 %d 条跨人格重复词条（同群共享）", merged)
         self.learner = SlangLearner(
             self.store,
             persona_id=persona_id,
@@ -778,7 +1021,7 @@ class SlangService:
         query: str = "",
         limit: int | None = None,
     ) -> dict[str, Any]:
-        """按需查询当前群已确认黑话（供 LLM 工具调用，不自动注入 prompt）。"""
+        """按需查询当前群已确认黑话（同群人格共享，不自动注入 prompt）。"""
         if not bool(getattr(self.config, "enabled", False)):
             return {"ok": False, "error": "黑话库未启用"}
         if not conversation_id.startswith("group:"):
@@ -795,6 +1038,7 @@ class SlangService:
             conversation_id=conversation_id,
             status="confirmed",
             limit=2000,
+            include_other_personas=True,
         )
         if needle:
             items = [
@@ -857,13 +1101,16 @@ class SlangService:
             conversation_id=conversation_id,
             max_entries=int(getattr(self.config, "inject_max", 8)),
             max_chars=int(getattr(self.config, "max_prompt_chars", 1200)),
+            include_other_personas=True,
         )
 
     def list_entries(self, **kwargs: Any) -> list[dict[str, Any]]:
+        kwargs.setdefault("include_other_personas", True)
         return self.store.list_entries(persona_id=self.persona_id, **kwargs)
 
-    def stats(self) -> dict[str, Any]:
-        return self.store.stats(persona_id=self.persona_id)
+    def stats(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("include_other_personas", True)
+        return self.store.stats(persona_id=self.persona_id, **kwargs)
 
     def conversations(self) -> list[str]:
         return self.learner.conversations()
@@ -879,4 +1126,11 @@ class SlangService:
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-__all__ = ["SLANG_STATUSES", "SlangLearner", "SlangService", "SlangStore"]
+__all__ = [
+    "DUPLICATE_REJECTION_CODE",
+    "DUPLICATE_REJECTION_REASON",
+    "SLANG_STATUSES",
+    "SlangLearner",
+    "SlangService",
+    "SlangStore",
+]

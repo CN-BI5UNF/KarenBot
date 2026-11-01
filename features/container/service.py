@@ -42,10 +42,131 @@ _INIT_TIMEOUT = 60.0
 _MAX_COMMAND_BYTES = 64 * 1024
 _MAX_TOOL_WRITE_BYTES = 8 * 1024 * 1024
 _CONTAINER_WORKDIR = "/workspace"
+_MAX_BROWSE_ENTRIES = 1000
+_MAX_PREVIEW_BYTES = 128 * 1024
+_MAX_BROWSE_OUTPUT_BYTES = 2 * 1024 * 1024
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _CREDENTIAL_URL_RE = re.compile(
     r"(https?://)[^/\s@]+@", re.IGNORECASE
 )
+
+# These scripts run inside the container and only use the Python standard
+# library. Paths and limits are passed as argv, never interpolated into shell.
+_BROWSE_SCRIPT = r'''
+import json, os, stat, sys
+
+def fail(message, code):
+    print(json.dumps({"error": message, "code": code}, ensure_ascii=False))
+    raise SystemExit(2)
+
+root = sys.argv[1]
+try:
+    limit = max(1, int(sys.argv[2]))
+except (IndexError, ValueError):
+    limit = 1000
+
+if os.path.realpath(root) != os.path.abspath(root):
+    fail("不允许通过符号链接浏览目录", "symlink")
+try:
+    iterator = os.scandir(root)
+except FileNotFoundError:
+    fail("目录不存在", "not_found")
+except NotADirectoryError:
+    fail("路径不是目录", "not_directory")
+except PermissionError:
+    fail("没有权限读取该目录", "permission_denied")
+except OSError:
+    fail("无法读取目录", "read_failed")
+
+entries = []
+truncated = False
+with iterator:
+    for entry in iterator:
+        if len(entries) >= limit:
+            truncated = True
+            break
+        try:
+            st = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if entry.is_symlink():
+            kind = "symlink"
+        elif entry.is_dir(follow_symlinks=False):
+            kind = "dir"
+        elif entry.is_file(follow_symlinks=False):
+            kind = "file"
+        else:
+            kind = "other"
+        target = ""
+        if kind == "symlink":
+            try:
+                target = os.readlink(entry.path)
+            except OSError:
+                target = ""
+        entries.append({
+            "name": entry.name,
+            "path": entry.path,
+            "type": kind,
+            "size": int(st.st_size),
+            "mtime": float(st.st_mtime),
+            "mode": format(stat.S_IMODE(st.st_mode), "04o"),
+            "target": target,
+        })
+entries.sort(key=lambda item: (item["type"] != "dir", item["name"].casefold()))
+print(json.dumps({"entries": entries, "truncated": truncated}, ensure_ascii=False))
+'''
+
+_PREVIEW_SCRIPT = r'''
+import json, os, stat, sys
+
+def fail(message, code):
+    print(json.dumps({"error": message, "code": code}, ensure_ascii=False))
+    raise SystemExit(2)
+
+path = sys.argv[1]
+try:
+    limit = max(1, int(sys.argv[2]))
+except (IndexError, ValueError):
+    limit = 131072
+
+if os.path.realpath(path) != os.path.abspath(path):
+    fail("不允许通过符号链接读取文件", "symlink")
+try:
+    st = os.stat(path, follow_symlinks=False)
+except FileNotFoundError:
+    fail("文件不存在", "not_found")
+except PermissionError:
+    fail("没有权限读取该文件", "permission_denied")
+except OSError:
+    fail("无法读取文件", "read_failed")
+if not stat.S_ISREG(st.st_mode):
+    fail("路径不是普通文件", "not_file")
+try:
+    with open(path, "rb") as handle:
+        data = handle.read(limit + 1)
+except PermissionError:
+    fail("没有权限读取该文件", "permission_denied")
+except OSError:
+    fail("无法读取文件", "read_failed")
+truncated = len(data) > limit
+data = data[:limit]
+binary = b"\x00" in data
+try:
+    text = data.decode("utf-8")
+except UnicodeDecodeError:
+    text = ""
+    binary = True
+print(json.dumps({
+    "name": os.path.basename(path),
+    "path": path,
+    "size": int(st.st_size),
+    "mtime": float(st.st_mtime),
+    "mode": format(stat.S_IMODE(st.st_mode), "04o"),
+    "content": "" if binary else text,
+    "binary": binary,
+    "truncated": truncated,
+}, ensure_ascii=False))
+'''
 
 
 def _safe_output_tail(text: str, limit: int = 600) -> str:
@@ -104,6 +225,29 @@ def _resolve_host_workspace_path(workspace_dir: Path | None, raw: str) -> Path:
             "宿主路径必须位于 AI workspace", code="container_path_forbidden"
         )
     return target
+
+
+def _safe_file_text(value: Any, limit: int = 512) -> str:
+    """Sanitize metadata returned by an untrusted container filesystem."""
+    text = "".join(
+        ch for ch in str(value or "")
+        if ord(ch) >= 32 and ord(ch) != 127
+    )
+    return text[:limit]
+
+
+def _file_error(payload: dict[str, Any]) -> ContainerError:
+    code = str(payload.get("code") or "")
+    message = _safe_file_text(payload.get("error"), 200) or "读取容器文件失败"
+    mapping = {
+        "not_found": "container_path_invalid",
+        "not_directory": "container_not_directory",
+        "not_file": "container_not_regular_file",
+        "permission_denied": "container_file_permission_denied",
+        "read_failed": "container_file_read_failed",
+        "symlink": "container_symlink_forbidden",
+    }
+    return ContainerError(message, code=mapping.get(code, "container_file_read_failed"))
 
 
 def _map_failure(result: CommandResult, *, default: str = "container_error") -> ContainerError:
@@ -883,6 +1027,172 @@ class ContainerService:
             "listing": result.stdout,
             "truncated": result.truncated,
         }
+
+    async def browse_files(self, path: str = _CONTAINER_WORKDIR) -> dict[str, Any]:
+        """Structured directory listing for the WebUI file manager.
+
+        A small Python helper runs inside the container so names with spaces,
+        quotes or newlines are returned as JSON instead of being parsed from
+        ``ls`` output. The helper never follows symlinks for metadata and the
+        WebUI does not offer a way to open them.
+        """
+        target = _validate_container_path(path, allow_root=True)
+        await self.ensure_running()
+        result = await self._run(
+            [
+                "exec",
+                self.name,
+                "python3",
+                "-c",
+                _BROWSE_SCRIPT,
+                target,
+                str(_MAX_BROWSE_ENTRIES),
+            ],
+            timeout=30.0,
+            max_output_bytes=_MAX_BROWSE_OUTPUT_BYTES,
+            raise_on_timeout=False,
+        )
+        self._touch()
+        if result.timed_out:
+            raise ContainerError("列目录超时", code="container_timeout")
+        if result.returncode != 0:
+            payload = self._parse_file_payload(result)
+            if payload is not None:
+                raise _file_error(payload)
+            if "python3" in result.stderr.lower():
+                raise ContainerError(
+                    "容器内缺少 python3，文件管理器暂不可用",
+                    code="container_file_manager_unavailable",
+                )
+            raise ContainerError("列目录失败", code="container_file_list_failed")
+        if result.truncated:
+            raise ContainerError(
+                "目录条目过多，无法完整读取", code="container_file_list_too_large"
+            )
+        payload = self._parse_file_payload(result)
+        if payload is None or payload.get("error"):
+            raise _file_error(payload or {})
+        entries: list[dict[str, Any]] = []
+        for item in payload.get("entries") or []:
+            if not isinstance(item, dict):
+                continue
+            raw_name = str(item.get("name") or "")
+            if (
+                not raw_name
+                or "/" in raw_name
+                or raw_name in {".", ".."}
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in raw_name)
+            ):
+                continue
+            name = _safe_file_text(raw_name, 512)
+            if not name:
+                continue
+            kind = str(item.get("type") or "other")
+            if kind not in {"dir", "file", "symlink", "other"}:
+                kind = "other"
+            try:
+                size = max(0, int(item.get("size") or 0))
+            except (TypeError, ValueError):
+                size = 0
+            try:
+                mtime = max(0.0, float(item.get("mtime") or 0))
+            except (TypeError, ValueError):
+                mtime = 0.0
+            entries.append(
+                {
+                    "name": name,
+                    "path": posixpath.join(target, name),
+                    "type": kind,
+                    "size": size,
+                    "mtime": mtime,
+                    "mode": _safe_file_text(item.get("mode"), 32),
+                    "target": _safe_file_text(item.get("target"), 1024),
+                }
+            )
+        entries.sort(key=lambda item: (item["type"] != "dir", item["name"].casefold()))
+        parent = None if target == _CONTAINER_WORKDIR else (
+            posixpath.dirname(target) or _CONTAINER_WORKDIR
+        )
+        return {
+            "ok": True,
+            "path": target,
+            "parent": parent,
+            "entries": entries,
+            "count": len(entries),
+            "truncated": bool(payload.get("truncated")),
+            "max_entries": _MAX_BROWSE_ENTRIES,
+        }
+
+    async def preview_file(
+        self, path: str, *, max_bytes: int = _MAX_PREVIEW_BYTES
+    ) -> dict[str, Any]:
+        """Return a bounded text preview; binary files never send bytes to UI."""
+        target = _validate_container_path(path)
+        limit = max(1, min(int(max_bytes), _MAX_PREVIEW_BYTES))
+        await self.ensure_running()
+        result = await self._run(
+            [
+                "exec",
+                self.name,
+                "python3",
+                "-c",
+                _PREVIEW_SCRIPT,
+                target,
+                str(limit),
+            ],
+            timeout=30.0,
+            max_output_bytes=max(limit * 2, 64 * 1024),
+            raise_on_timeout=False,
+        )
+        self._touch()
+        if result.timed_out:
+            raise ContainerError("读取文件超时", code="container_timeout")
+        if result.returncode != 0:
+            payload = self._parse_file_payload(result)
+            if payload is not None:
+                raise _file_error(payload)
+            if "python3" in result.stderr.lower():
+                raise ContainerError(
+                    "容器内缺少 python3，文件管理器暂不可用",
+                    code="container_file_manager_unavailable",
+                )
+            raise ContainerError("读取容器文件失败", code="container_file_read_failed")
+        if result.truncated:
+            raise ContainerError(
+                "文件预览输出超过上限", code="container_file_too_large"
+            )
+        payload = self._parse_file_payload(result)
+        if payload is None or payload.get("error"):
+            raise _file_error(payload or {})
+        try:
+            size = max(0, int(payload.get("size") or 0))
+        except (TypeError, ValueError):
+            size = 0
+        try:
+            mtime = max(0.0, float(payload.get("mtime") or 0))
+        except (TypeError, ValueError):
+            mtime = 0.0
+        return {
+            "ok": True,
+            "path": target,
+            "name": _safe_file_text(payload.get("name"), 512)
+            or posixpath.basename(target),
+            "size": size,
+            "mtime": mtime,
+            "mode": _safe_file_text(payload.get("mode"), 32),
+            "content": str(payload.get("content") or ""),
+            "binary": bool(payload.get("binary")),
+            "truncated": bool(payload.get("truncated")),
+            "preview_bytes": limit,
+        }
+
+    @staticmethod
+    def _parse_file_payload(result: CommandResult) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(result.stdout)
+        except (TypeError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
 
     async def import_file(
         self,

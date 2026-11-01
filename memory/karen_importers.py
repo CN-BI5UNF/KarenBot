@@ -127,12 +127,14 @@ def import_legacy_memory_files(
     usage_persona_id: str | None = None,
     usage_source_path: str | Path | None = None,
     skip_existing_domains: bool = False,
+    import_usage: bool = True,
 ) -> LegacyMemoryImportResult:
     """同步导入第一批旧 memory/logs 文件到 karen.db。
 
     `usage_persona_id=None` 表示跟随 `persona_id`；传入空字符串表示全局 usage。
     `usage_source_path=None` 保持旧行为，从 `source_dir / "model_usage.jsonl"` 导入。
     `skip_existing_domains=True` 时，history/important/rolling 等已有数据的域不会被旧文件覆盖。
+    `import_usage=False` 时跳过全局 model_usage.jsonl（人格清理后的防复活标记）。
     """
 
     try:
@@ -147,6 +149,7 @@ def import_legacy_memory_files(
                 usage_persona_id=usage_persona_id,
                 usage_source_path=usage_source_path,
                 skip_existing_domains=skip_existing_domains,
+                import_usage=import_usage,
             )
         )
     raise RuntimeError("import_legacy_memory_files cannot run inside a running event loop")
@@ -161,6 +164,7 @@ async def import_legacy_memory_files_async(
     usage_persona_id: str | None = None,
     usage_source_path: str | Path | None = None,
     skip_existing_domains: bool = False,
+    import_usage: bool = True,
 ) -> LegacyMemoryImportResult:
     """异步导入第一批旧 memory/logs 文件到 karen.db。"""
 
@@ -172,6 +176,7 @@ async def import_legacy_memory_files_async(
         usage_persona_id=usage_persona_id,
         usage_source_path=usage_source_path,
         skip_existing_domains=skip_existing_domains,
+        import_usage=import_usage,
     )
 
 
@@ -184,6 +189,7 @@ async def _import_legacy_memory_files_async(
     usage_persona_id: str | None,
     usage_source_path: str | Path | None,
     skip_existing_domains: bool,
+    import_usage: bool = True,
 ) -> LegacyMemoryImportResult:
     target_db = db if isinstance(db, KarenDB) else KarenDB(db)
     should_close_db = not isinstance(db, KarenDB)
@@ -242,11 +248,15 @@ async def _import_legacy_memory_files_async(
             )
 
         usage_result = LegacyImportDomainResult()
-        if not skip_existing_domains or _domain_row_count(
-            target_db,
-            "usage_records",
-            normalized_usage_persona,
-        ) == 0:
+        if import_usage and (
+            not skip_existing_domains
+            or _domain_row_count(
+                target_db,
+                "usage_records",
+                normalized_usage_persona,
+            )
+            == 0
+        ):
             usage_result = _import_usage(target_db, usage_path, normalized_usage_persona)
 
         events_result = LegacyImportDomainResult()

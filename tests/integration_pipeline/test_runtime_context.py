@@ -27,6 +27,7 @@ def test_text_mentions_self_or_role_uses_deterministic_tokens():
     assert _text_mentions_self_or_role("[CQ:at,qq=999] 在吗", "999", "测试机器人") is True
 
     assert _text_mentions_self_or_role("@测试机器人 在吗", "999", "测试机器人") is True
+    assert _text_mentions_self_or_role("@我 在吗", "999", "测试机器人") is True
 
     assert _text_mentions_self_or_role("普通插话", "999", "测试机器人") is False
 

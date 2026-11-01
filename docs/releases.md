@@ -1,7 +1,8 @@
 # Releases 版本管理
 
-当前开发阶段暂不发布正式版本号。版本使用日期快照 tag，例如
-`snapshot-20261025`；GitHub Releases 与 tag 使用同一个名字。
+当前发布版本：`1.0.0-beta`，tag 为 `v1.0.0-beta`，版本日志是
+`releases/v1.0.0-beta.md`。历史日期快照 tag（如 `snapshot-20261030`）继续保留；
+GitHub Releases 与 tag 使用同一个名字。
 
 ## 发布仓库
 
