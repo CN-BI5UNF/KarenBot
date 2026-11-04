@@ -39,8 +39,10 @@ KarenBot 是一个通用聊天智能体框架。你给它一个人格，它就�
 - **原生视觉 / 独立视觉**：图片、完整 GIF 动图和完整视频可进入支持的主模型请求；也可按需走独立视觉接口。视频以受管 data URL 发送完整文件、不抽帧，模型不支持时只保留 workspace 占位。
 - **知识与群聊黑话**：按需查询，不再每轮把词表/知识注入动态上下文；知识支持逐条共享，群聊黑话按群天然共享（同群所有人格互通），保存时自动去重。
 - **聊天选择**：LLM 可临时暂停普通群聊接收，或只接收指定群；所有群的 @ 消息仍会送达，私聊不受影响。
+- **本机工作区**：「容器」页文件管理内置「本机工作区」模式，只读浏览 `AppPaths.WORKSPACE_DIR`，支持目录导航、文本预览和常见图片；它与容器 `/workspace` 的独立存储不是同一个目录。
+- **按群 @ 触发**：可在「群聊触发」页指定哪些群只在被 @ 时响应，并设置 @ 后连续接收的消息数或时间窗口；LLM 可用 `group_trigger_window` 临时放行/延长/提前关闭，最多同时覆盖 2 个群。
 - **表情包与 QQ 原生表情**：LLM 可以列出、下载、从群聊图片保存、重命名和删除表情包；入站 QQ 表情显示中文名（如 `[流眼泪]` 对应 `[表情5]`），发送工具支持按中文名发原生表情。
-- **受控 Docker 容器**：LLM 可执行命令、读写 `/workspace`、导入导出文件；默认无网络、无特权、非 root，内存/CPU/pids/存储可配置。默认 B 命名卷免管理员、开箱即用；C 固定大小镜像为高级硬上限。支持 Docker 镜像加速前缀、一键准备/启动，WebUI 内置 `/workspace` 文件管理器，Windows 提供 VHDX 安装脚本（见 [容器文档](docs/container.md)）。
+- **受控 Docker 容器**：LLM 可执行命令、读写 `/workspace`、导入导出文件；默认无网络、无特权、非 root，内存/CPU/pids/存储可配置。默认 B 命名卷免管理员、开箱即用；C 固定大小镜像为高级硬上限。支持 Docker 镜像加速前缀、一键准备/启动，WebUI 内置只读文件管理器（本机工作区 + 容器工作区，支持图片预览），Windows 提供 VHDX 安装脚本（见 [容器文档](docs/container.md)）。
 - **存储与配置安全**：滚动摘要、CAS 提交、媒体生命周期、范围删除/恢复、配置事务与备份；「存储与数据」页统一提供缓存盘点/清理、上下文预算、人格运行数据清理和本地卸载。
 - **在线更新**：设置 → 更新，从 GitHub Releases/tag 选择更新或回退；只改源码，不覆盖数据。
 
@@ -234,9 +236,7 @@ LLM 可调用 `list_emoji`、`save_emoji_from_url`、`save_emoji_from_workspace`
 
 ## 路线图
 
-以下功能在方案中，尚未在本版本全部落地：
-
-- **工具分层路由**：工具集 + `load_toolset` 动态加载，减少全量 schema token。
+- **工具双层路由（实验原型）**：`behavior.tool_schema_profile="routed"` 初始只暴露核心工具和工具集目录，模型用 `list_toolsets` / `load_toolset` 按需加载 `workspace`、`qq_admin`、`container` 等工具集，再用 `tool_search` 查高级参数。已加载集合按会话保持；默认仍为 `compact`。详见 [工具双层路由](docs/tool_routing.md)。
 
 ## 测试与质量
 
@@ -294,7 +294,7 @@ KarenBot/
 ## 已知限制
 
 - 这是开发快照，接口和配置仍可能调整；未执行生产迁移、备份恢复或 launcher 安装。
-- 工具分层路由仍在后续阶段；完整 GIF/视频输入仅对已核实支持的主模型开启（当前内置能力表包含 Qwen3.6-Plus / Qwen3-VL / OpenRouter Gemini）。Docker 容器 C 模式需要一次性管理员初始化（Linux sudo 密码弹窗 / Windows UAC），Windows VHDX 脚本待实机验收；容器启用后启动时会后台自动拉取缺失镜像。
+- 工具双层路由处于实验阶段，默认仍使用 compact；动态加载工具集会改变 tools 块，可能影响 KV cache 命中。完整 GIF/视频输入仅对已核实支持的主模型开启（当前内置能力表包含 Qwen3.6-Plus / Qwen3-VL / OpenRouter Gemini）。Docker 容器 C 模式需要一次性管理员初始化（Linux sudo 密码弹窗 / Windows UAC），Windows VHDX 脚本待实机验收；容器启用后启动时会后台自动拉取缺失镜像。
 - 旧 `debata` 数据目录默认继续使用；迁移前请先备份。
 - NapCat 未连接时 QQ 不会收发；以日志中的连接状态为准。
 

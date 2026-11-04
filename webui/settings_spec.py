@@ -537,8 +537,11 @@ SETTINGS_GROUPS: list[Section] = [
             {"path": "behavior.tool_schema_profile",
              "label": "工具 schema 档位", "type": "enum", "default": "compact",
              "options": [["compact", "compact（省 token，推荐）"],
-                         ["full", "full（旧行为，排查用）"]],
-             "needs_restart": True},
+                         ["full", "full（旧行为，排查用）"],
+                         ["routed", "routed（工具集双层路由，实验）"]],
+             "needs_restart": True,
+             "help": "routed 初始只暴露核心工具和工具集目录；模型用 load_toolset "
+                     "加载所需工具集，再用 tool_search 查询高级参数。"},
             {"path": "behavior.kv_prompt_diagnostics",
              "label": "KV 诊断级别", "type": "enum", "default": "summary",
              "options": [["off", "off"], ["summary", "summary（轻量）"],

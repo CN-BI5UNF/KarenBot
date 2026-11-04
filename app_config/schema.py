@@ -989,6 +989,48 @@ class ContainerFeatureConfig(StrictModel):
         return text
 
 
+class GroupTriggerRuleConfig(StrictModel):
+    """One group that only starts a receive window after an @ mention."""
+
+    group_id: int = Field(..., strict=True, ge=1)
+    """QQ 群号。"""
+
+    max_messages: int = Field(default=0, strict=True, ge=0, le=1000)
+    """被 @ 后最多连续接收的普通群消息数；0 = 不按条数关闭。"""
+
+    window_minutes: int = Field(default=0, strict=True, ge=0, le=1440)
+    """被 @ 后接收窗口最长分钟数；0 = 不按时间关闭。"""
+
+
+class GroupTriggerConfig(StrictModel):
+    """Per-group mention-triggered receive windows.
+
+    Listed groups ignore ordinary messages until someone @s the bot.  The
+    mention opens a window limited by message count and/or time; both enabled
+    means whichever limit is reached first closes the window.  Unlisted groups
+    keep the normal receive behavior.
+    """
+
+    enabled: bool = False
+    groups: list[GroupTriggerRuleConfig] = Field(
+        default_factory=list, max_length=200
+    )
+
+    @field_validator("groups")
+    @classmethod
+    def _deduplicate_groups(
+        cls, value: list[GroupTriggerRuleConfig]
+    ) -> list[GroupTriggerRuleConfig]:
+        seen: set[int] = set()
+        result: list[GroupTriggerRuleConfig] = []
+        for item in value:
+            if item.group_id in seen:
+                continue
+            seen.add(item.group_id)
+            result.append(item)
+        return result
+
+
 class FeaturesConfig(StrictModel):
     vision: VisionFeatureConfig = Field(default_factory=VisionFeatureConfig)
     asr: ASRFeatureConfig = Field(default_factory=ASRFeatureConfig)
@@ -1000,6 +1042,7 @@ class FeaturesConfig(StrictModel):
     slang: SlangFeatureConfig = Field(default_factory=SlangFeatureConfig)
     knowledge: KnowledgeFeatureConfig = Field(default_factory=KnowledgeFeatureConfig)
     container: ContainerFeatureConfig = Field(default_factory=ContainerFeatureConfig)
+    group_trigger: GroupTriggerConfig = Field(default_factory=GroupTriggerConfig)
 
 
 # ============================================================
@@ -1740,8 +1783,9 @@ class BehaviorConfig(StrictModel):
     summarize: SummarizeConfig = Field(default_factory=SummarizeConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
 
-    tool_schema_profile: Literal["compact", "full"] = "compact"
-    """工具 schema 暴露档位：compact=核心字段直出、其余按需 tool_search；full=旧行为。"""
+    tool_schema_profile: Literal["compact", "full", "routed"] = "compact"
+    """工具 schema 暴露档位：compact=核心字段直出、其余按需 tool_search；
+    full=旧行为；routed=双层路由（核心工具 + load_toolset 工具集 + tool_search）。"""
 
     kv_prompt_diagnostics: Literal["off", "summary", "full"] = "summary"
     """KV 诊断级别：off 关闭；summary 只做轻量计数；full 保留旧的全量序列化哈希。"""

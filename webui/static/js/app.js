@@ -7,6 +7,7 @@ import { h, fill, qs, formatDuration, empty } from './dom.js';
 import { api, endpoints, setUnauthorizedHandler } from './api.js';
 import { icon } from './icons.js';
 import { EventStream } from './ws.js';
+import { initTooltips } from './tooltip.js';
 
 import * as overview from './pages/overview.js';
 import * as chats from './pages/chats.js';
@@ -22,24 +23,26 @@ import * as containerPage from './pages/container.js';
 import * as storage from './pages/storage.js';
 import * as settings from './pages/settings.js';
 import * as blacklist from './pages/blacklist.js';
+import * as groupTriggers from './pages/group_triggers.js';
 import * as setup from './pages/setup.js';
 
 // icon 字段是 icons.js 里的键名，不用 emoji（docs/ui_style_guide.md §六）。
 const NAV_ITEMS = [
-  { key: 'overview', title: '总览', icon: 'overview', page: overview },
-  { key: 'chats', title: '对话', icon: 'chats', page: chats },
-  { key: 'memory', title: '记忆', icon: 'memory', page: memory },
-  { key: 'persona_mind', title: '人格后台', icon: 'persona_mind', page: mind },
-  { key: 'logs', title: '日志', icon: 'logs', page: logs },
-  { key: 'personas', title: '人格', icon: 'personas', page: personas },
-  { key: 'slang', title: '黑话', icon: 'slang', page: slang },
-  { key: 'knowledge', title: '知识', icon: 'knowledge', page: knowledge },
-  { key: 'models', title: '模型管理', icon: 'models', page: models },
-  { key: 'emoji', title: '表情包', icon: 'emoji', page: emoji },
-  { key: 'container', title: '容器', icon: 'container', page: containerPage },
-  { key: 'storage', title: '存储与数据', icon: 'storage', page: storage },
-  { key: 'blacklist', title: '黑白名单', icon: 'blacklist', page: blacklist },
-  { key: 'settings', title: '设置', icon: 'settings', page: settings },
+  { key: 'overview', title: '总览', hint: '运行状态、用量与快捷操作', icon: 'overview', page: overview },
+  { key: 'chats', title: '对话', hint: '会话列表与聊天记录', icon: 'chats', page: chats },
+  { key: 'memory', title: '记忆', hint: '重要记忆与长期记忆', icon: 'memory', page: memory },
+  { key: 'persona_mind', title: '人格后台', hint: '人格心绪与后台活动', icon: 'persona_mind', page: mind },
+  { key: 'logs', title: '日志', hint: '运行日志与错误诊断', icon: 'logs', page: logs },
+  { key: 'personas', title: '人格', hint: '人格定义、形象与运行数据', icon: 'personas', page: personas },
+  { key: 'slang', title: '黑话', hint: '群聊黑话与群梗库', icon: 'slang', page: slang },
+  { key: 'knowledge', title: '知识', hint: '热梗、事实与知识笔记', icon: 'knowledge', page: knowledge },
+  { key: 'models', title: '模型管理', hint: '提供商、模型与路由', icon: 'models', page: models },
+  { key: 'emoji', title: '表情包', hint: '表情包库与上传', icon: 'emoji', page: emoji },
+  { key: 'container', title: '容器', hint: 'Docker、两个工作区与只读文件管理', icon: 'container', page: containerPage },
+  { key: 'storage', title: '存储与数据', hint: '存储、清理、备份与卸载', icon: 'storage', page: storage },
+  { key: 'blacklist', title: '黑白名单', hint: '群与用户访问控制', icon: 'blacklist', page: blacklist },
+  { key: 'group_triggers', title: '群聊触发', hint: '按群 @ 触发窗口', icon: 'chats', page: groupTriggers },
+  { key: 'settings', title: '设置', hint: '运行参数、模型与路径诊断', icon: 'settings', page: settings },
 ];
 
 const TOAST_MS = 3200;
@@ -194,18 +197,19 @@ async function navigate(key, { force = false, section = null } = {}) {
 
 function buildNav() {
   const nav = qs('#nav');
-  fill(nav, ...NAV_ITEMS.map((item) =>
-    h('button', {
+  fill(nav, ...NAV_ITEMS.map((item) => {
+    const label = item.hint ? `${item.title} · ${item.hint}` : item.title;
+    return h('button', {
       class: 'nav-item',
       dataset: { key: item.key },
-      title: item.title,
-      'aria-label': item.title,
+      title: label,
+      'aria-label': label,
       onclick: () => navigate(item.key),
     },
       h('span', { class: 'nav-icon' }, icon(item.icon)),
       h('span', {}, item.title),
-    ),
-  ));
+    );
+  }));
 }
 
 // ============================================================
@@ -473,6 +477,7 @@ function wireChrome() {
   });
 }
 
+initTooltips();
 wireChrome();
 boot().catch((e) => {
   console.error(e);

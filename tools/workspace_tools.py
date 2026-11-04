@@ -103,6 +103,7 @@ def _line_preview(
     ),
     args_model=ReadFileArgs,
     category="workspace",
+    examples=[{"path": "incoming/question.pdf", "max_bytes": 12000}],
 )
 async def read_file(args: ReadFileArgs, ctx: ToolContext) -> dict:
     try:
@@ -390,6 +391,7 @@ def _xlsx_cell_text(cell: ElementTree.Element, shared: list[str], ns: dict[str, 
     ),
     args_model=WriteFileArgs,
     category="workspace",
+    examples=[{"path": "notes/todo.md", "content": "- 买牛奶\n- 修自行车"}],
 )
 async def write_file(args: WriteFileArgs, ctx: ToolContext) -> dict:
     try:
@@ -425,6 +427,13 @@ async def write_file(args: WriteFileArgs, ctx: ToolContext) -> dict:
     ),
     args_model=EditFileArgs,
     category="workspace",
+    examples=[
+        {
+            "path": "notes/todo.md",
+            "old": "- 买牛奶",
+            "new": "- 买牛奶和面包",
+        }
+    ],
 )
 async def edit_file(args: EditFileArgs, ctx: ToolContext) -> dict:
     try:
@@ -475,6 +484,7 @@ async def edit_file(args: EditFileArgs, ctx: ToolContext) -> dict:
     ),
     args_model=ListFilesArgs,
     category="workspace",
+    examples=[{"path": ".", "pattern": "**/*.json"}],
 )
 async def list_files(args: ListFilesArgs, ctx: ToolContext) -> dict:
     try:
@@ -587,6 +597,7 @@ async def delete_file(args: DeleteFileArgs, ctx: ToolContext) -> dict:
     ),
     args_model=RunPythonArgs,
     category="workspace",
+    examples=[{"code": "print(sum(range(10)))", "timeout_seconds": 30}],
 )
 async def run_python(args: RunPythonArgs, ctx: ToolContext) -> dict:
     if ctx.workspace_dir is None:

@@ -209,7 +209,10 @@ Anthropic 走原生图块，其余预设保守不发送未声明的 detail。
 
 - `behavior.tool_schema_profile="compact"`（默认）：11 个高频工具直出核心字段；
   其余工具为 stub，需先 `tool_search`；高级可选字段通过 `tool_search detail=full` 查看。
-- `"full"`：保留旧的 31 个 full schema 行为，用于回滚/排查。
+- `"full"`：保留旧的 full schema 行为，用于回滚/排查。
+- `"routed"`（实验）：初始只暴露核心工具 + `list_toolsets` / `load_toolset`，
+  按会话用 `load_toolset` 动态加载工具集，已加载工具使用 compact schema；
+  未加载工具执行时返回 `need_toolset`。详见 [工具双层路由](tool_routing.md)。
 - `finish_after_success` 已从 schema 移除；执行层兼容旧调用。发送成功后
   `behavior.auto_finish_after_send=true` 会直接结束本轮，避免额外一次 `no_action` 调用。
 

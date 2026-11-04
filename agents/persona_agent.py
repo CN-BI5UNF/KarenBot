@@ -347,6 +347,7 @@ class PersonaAgent:
         self._context_view = PersonaContextView()
         self._state_lock = asyncio.Lock()
         self._timer_task: asyncio.Task[None] | None = None
+        self._action_task: asyncio.Task[None] | None = None
         self._active_sleep_record_id: str | None = None
         self._active_sleep_record: dict[str, Any] | None = None
         self._active_eat_record: dict[str, Any] | None = None
@@ -373,6 +374,7 @@ class PersonaAgent:
             )
             await self._append_startup_reconcile_log_locked(startup_previous, now)
             await self._complete_active_resting_action_todos_locked(now)
+            self._schedule_action_settlement_locked()
             await self._save_state_locked()
 
         if self._timer_task is None or self._timer_task.done():
@@ -387,6 +389,13 @@ class PersonaAgent:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+        action_task = self._action_task
+        self._action_task = None
+        if action_task is not None:
+            action_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await action_task
 
         async with self._state_lock:
             await self._save_state_locked()
@@ -496,6 +505,11 @@ class PersonaAgent:
         fallback = False
         try:
             async with self._state_lock:
+                # The periodic maintenance interval can be much longer than an
+                # eat/sleep/work action. Settle an expired action before the
+                # normal after-turn path so satiety/energy reflect completion
+                # even when this is the first event after the deadline.
+                await self._reconcile_physiology_locked(time.time())
                 if self.is_resting() or self.is_working():
                     skip_reason = "persona_working" if self.is_working() else "persona_resting"
                     await self._append_state_log_locked(
@@ -624,6 +638,7 @@ class PersonaAgent:
             self._active_eat_record = None
             await self._complete_current_action_todos_locked("sleep", now)
             await self._append_state_log_locked({"event": "sleep_start", **record})
+            self._schedule_action_settlement_locked()
             await self._save_state_locked()
 
         threshold = _read_number(
@@ -696,6 +711,7 @@ class PersonaAgent:
                     "reason": str(reason or ""),
                 }
             )
+            self._schedule_action_settlement_locked()
             await self._save_state_locked()
 
         return {
@@ -715,6 +731,7 @@ class PersonaAgent:
             self._state.current_action = "awake"
             self._state.action_until = None
             self._state.last_tick_at = now
+            self._cancel_action_settlement_locked()
             await self._append_state_log_locked(
                 {"event": "work_end", "reason": str(reason or "finished"), "ended_at": now}
             )
@@ -737,6 +754,7 @@ class PersonaAgent:
                 now,
                 {"wakeup_reason": reason},
             )
+            self._cancel_action_settlement_locked()
             await self._append_state_log_locked(
                 {"event": "wakeup", "reason": reason, "previous_action": previous_action}
             )
@@ -786,6 +804,7 @@ class PersonaAgent:
             )
             await self._append_state_log_locked({"event": "eat_start", **record})
             await self._complete_current_action_todos_locked("eat", now)
+            self._schedule_action_settlement_locked()
             await self._save_state_locked()
 
         return {
@@ -811,6 +830,79 @@ class PersonaAgent:
                 "status": "collapsing",
                 "action_until": self._state.action_until,
             }
+
+    def _cancel_action_settlement_locked(self) -> None:
+        task = self._action_task
+        self._action_task = None
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+
+    def _schedule_action_settlement_locked(self) -> None:
+        """Wake exactly when the current action expires, independent of the
+        (possibly 90-minute) periodic maintenance interval."""
+        self._cancel_action_settlement_locked()
+        if self._state.current_action not in _ENGAGED_ACTIONS:
+            return
+        action_until = _optional_float(self._state.action_until)
+        if action_until is None:
+            return
+        self._action_task = asyncio.create_task(
+            self._action_settlement_loop(action_until)
+        )
+
+    async def _action_settlement_loop(self, expected_until: float) -> None:
+        current = asyncio.current_task()
+        try:
+            while True:
+                delay = expected_until - time.time()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                    continue
+                async with self._state_lock:
+                    action_until = _optional_float(self._state.action_until)
+                    if (
+                        self._state.current_action not in _ENGAGED_ACTIONS
+                        or action_until is None
+                        or abs(action_until - expected_until) > 0.001
+                    ):
+                        return
+                    now = time.time()
+                    if action_until > now:
+                        continue
+                    finished = await self._reconcile_physiology_locked(now)
+                    await self._save_state_locked()
+                    if finished is not None:
+                        logger.info("人格动作到时结算完成 action=%s", finished)
+                        self._emit_status("idle", "人格动作已结算")
+                    if (
+                        self._state.current_action in _ENGAGED_ACTIONS
+                        and (
+                            self._action_task is None
+                            or self._action_task.done()
+                        )
+                    ):
+                        self._schedule_action_settlement_locked()
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("人格动作到时结算失败")
+        finally:
+            if self._action_task is current:
+                self._action_task = None
+
+    async def settle_expired_action(self, now: float | None = None) -> str | None:
+        """Settle an expired action on demand (pipeline/after-turn fallback)."""
+        current = time.time() if now is None else float(now)
+        async with self._state_lock:
+            if self._state.current_action not in _ENGAGED_ACTIONS:
+                return None
+            if not _action_until_expired(self._state.action_until, current):
+                return None
+            finished = await self._reconcile_physiology_locked(current)
+            if finished is not None:
+                await self._save_state_locked()
+            return finished
 
     async def _timer_loop(self) -> None:
         interval_seconds = max(
@@ -1692,6 +1784,7 @@ class PersonaAgent:
         if recovery_source_hint:
             extra_updates["_recovery_source_hint"] = recovery_source_hint
         await self._finish_active_record_locked(previous, now, extra_updates)
+        self._cancel_action_settlement_locked()
         await self._append_state_log_locked(
             {"event": "action_finished", "previous_action": previous}
         )
@@ -2429,6 +2522,7 @@ class PersonaAgent:
         self._state.action_until = now + sleep_hours * 3600.0
         self._state.last_sleep_at = now
         self._state.mood = clamp_percent(self._state.mood - mood_penalty)
+        self._schedule_action_settlement_locked()
 
     def _profile_for_conversation(self, conversation_id: str) -> UserProfile | None:
         user_id = _user_id_from_conversation(conversation_id)

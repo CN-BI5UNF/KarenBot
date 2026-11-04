@@ -59,6 +59,10 @@ class PipelineTaskContextMixin:
                         "其他群的 @ 消息仍会送达。需要恢复时调用 chat_selection mode=all。"
                     )
 
+        trigger_hint = self._group_trigger_context_hint(conversation_id)
+        if trigger_hint:
+            parts.append(trigger_hint)
+
         pending_info = self.pending_requests.to_prompt_text()
         if pending_info:
             parts.append(pending_info)
@@ -71,6 +75,47 @@ class PipelineTaskContextMixin:
         # list_knowledge_notes 按需查询，避免每轮把整张表塞进动态上下文，
         # 也让稳定前缀和后续历史更容易命中 KV cache。
         return "\n".join(parts)
+
+    def _group_trigger_context_hint(self, conversation_id: str | None) -> str:
+        manager = getattr(self, "group_trigger", None)
+        if manager is None or not getattr(manager, "enabled", False):
+            return ""
+        if not conversation_id or not conversation_id.startswith("group:"):
+            return ""
+        try:
+            group_id = int(conversation_id.split(":", 1)[1])
+        except (TypeError, ValueError):
+            return ""
+        snapshot = manager.context_snapshot(group_id)
+        if not snapshot:
+            return ""
+        if not snapshot.get("active"):
+            if snapshot.get("closed_after"):
+                return (
+                    f"群聊 @ 触发窗口刚刚用完（群 {group_id}）。如果仍需接收本群"
+                    f"普通消息，先 tool_search 查询参数，再调用 group_trigger_window "
+                    f"action=open group_ids=[{group_id}] duration_minutes=...；最多同时临时"
+                    "放行 2 个群。"
+                )
+            return ""
+        source = "LLM 临时放行" if snapshot.get("llm_owned") else "@ 触发"
+        limits: list[str] = []
+        remaining = snapshot.get("remaining_messages")
+        if remaining is not None:
+            limits.append(f"剩余 {remaining} 条消息")
+        minutes = snapshot.get("remaining_minutes")
+        if minutes is not None:
+            limits.append(f"剩余约 {minutes} 分钟")
+        detail = "、".join(limits) if limits else "按当前群规则"
+        text = f"群聊接收窗口（群 {group_id}，{source}）：{detail}。"
+        if snapshot.get("near_limit"):
+            text += (
+                "窗口即将结束；如果需要继续接收，先 tool_search 查询参数，再调用 "
+                f"group_trigger_window action=extend group_ids=[{group_id}] "
+                "duration_minutes=...。"
+            )
+        text += "也可以调用 group_trigger_window action=close 提前关闭。"
+        return text
 
     def _message_age_hint(self, conversation_id: str) -> str:
         """qq-bridge 式时间感：旧消息不要当成实时对话。"""
@@ -121,9 +166,11 @@ class PipelineTaskContextMixin:
         build_messages_fn: Callable[..., list[dict[str, Any]]],
     ) -> dict[str, Any]:
         policy = self._model_view_policy()
+        routing_check = getattr(self, "_tool_routing_enabled", None)
         flags = {
             "eat_tool": bool(getattr(self, "eat_tool", False)),
             "sleep_tool": bool(getattr(self, "sleep_tool", False)),
+            "tool_routing": bool(routing_check()) if callable(routing_check) else False,
             "cache_friendly_history": policy.enabled,
             "model_view_policy": policy,
         }

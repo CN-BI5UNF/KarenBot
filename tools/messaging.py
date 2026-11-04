@@ -464,6 +464,13 @@ async def recall_message(args: RecallMessageArgs, ctx: ToolContext) -> dict:
     ),
     args_model=UploadFileArgs,
     category="messaging",
+    examples=[
+        {
+            "target_type": "group",
+            "target_id": 123456,
+            "file_path": "report.pdf",
+        }
+    ],
 )
 async def upload_file(args: UploadFileArgs, ctx: ToolContext) -> dict:
     """通过 adapter.upload_file 上传。安全检查：file_path 必须在 workspace 下。"""

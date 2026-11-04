@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from app_config.schema import ProviderConfig
+from app_config.schema import ProviderConfig, ReasoningConfig
 from providers.presets_loader import load_all_presets
 from providers.registry import build_provider
 
@@ -21,6 +21,26 @@ def test_registry_propagates_effort_style_from_preset():
     )
     assert provider.reasoning_effort_style == "deepseek"
     assert provider.reasoning_style == "thinking_extra_body"
+
+
+def test_custom_relay_can_enable_openai_reasoning_effort():
+    """本机 Gemini 反代这类自定义 provider 显式声明后必须发送 reasoning_effort。"""
+    presets = load_all_presets(Path("providers/presets"), force_reload=True)
+    cfg = ProviderConfig(
+        protocol="openai_compat",
+        base_url="http://127.0.0.1:8317/v1",
+        reasoning_effort_style="openai",
+    )
+    provider = build_provider(
+        "local_relay",
+        cfg,
+        SimpleNamespace(get=lambda _key: None),
+        presets,
+    )
+    reasoning = ReasoningConfig(enabled=True, budget="high")
+
+    assert provider.reasoning_effort_style == "openai"
+    assert provider._reasoning_effort(reasoning, model="gemini-3.8-flash-high") == "high"
 
 
 def test_reasoning_effort_options_follow_preset_model_and_custom_fallback():

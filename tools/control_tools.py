@@ -6,7 +6,12 @@ import inspect
 import logging
 
 from .base import ToolContext, tool
-from .schemas import ChatSelectionArgs, NoActionArgs, ScheduleWakeupArgs
+from .schemas import (
+    ChatSelectionArgs,
+    GroupTriggerWindowArgs,
+    NoActionArgs,
+    ScheduleWakeupArgs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,4 +203,71 @@ async def chat_selection(args: ChatSelectionArgs, ctx: ToolContext) -> dict:
         "status": "updated",
         "brief": brief,
         "selection": selection,
+    }
+
+
+@tool(
+    name="group_trigger_window",
+    description=(
+        "管理用户设置的按群 @ 触发窗口。open=临时放行群消息，extend=在窗口即将"
+        "结束时延长，close=提前关闭，status=查看。group_ids 每次最多 2 个；"
+        "留空时默认当前群。临时放行最多同时覆盖 2 个群，时长由你决定。"
+        "普通群消息被过滤后不会送到你这里，所以要在窗口关闭前调用 extend。"
+    ),
+    args_model=GroupTriggerWindowArgs,
+    category="control",
+    no_feedback=True,
+    search_tags=["群聊", "触发", "@", "窗口", "放行", "group"],
+    risk_level="medium",
+    examples=[
+        {
+            "action": "open",
+            "group_ids": [123456],
+            "duration_minutes": 30,
+            "reason": "用户要求继续关注这个群",
+        }
+    ],
+)
+async def group_trigger_window(
+    args: GroupTriggerWindowArgs, ctx: ToolContext
+) -> dict:
+    if ctx.group_trigger_cb is None:
+        return {
+            "ok": False,
+            "status": "unavailable",
+            "brief": "群聊触发窗口暂不可用：未注入运行状态。",
+            "error": "group_trigger_window unavailable",
+        }
+    default_group_id = ctx.extras.get("current_group_id")
+    try:
+        result = ctx.group_trigger_cb(
+            action=args.action,
+            group_ids=list(args.group_ids),
+            duration_minutes=args.duration_minutes,
+            reason=args.reason,
+            default_group_id=default_group_id,
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except Exception as exc:  # noqa: BLE001 - safe validation message
+        return {
+            "ok": False,
+            "status": "failed",
+            "brief": f"调整群聊触发窗口失败：{exc}",
+            "error": str(exc),
+        }
+    data = result if isinstance(result, dict) else {"action": args.action}
+    if args.action == "open":
+        brief = "已临时放行指定群的消息接收。"
+    elif args.action == "extend":
+        brief = "已延长指定群的接收窗口。"
+    elif args.action == "close":
+        brief = "已提前关闭指定群的接收窗口。"
+    else:
+        brief = "已读取群聊触发窗口状态。"
+    return {
+        "ok": True,
+        "status": "updated",
+        "brief": brief,
+        "result": data,
     }

@@ -22,6 +22,7 @@ export function openStorageSetup(ctx, payload = {}) {
   const storage = payload.storage || {};
   const admin = payload.admin || {};
   const method = admin.method || 'manual';
+  const remount = storage.code === 'container_storage_not_mounted';
 
   let passwordInput = null;
   const statusLine = h('p', {
@@ -64,13 +65,15 @@ export function openStorageSetup(ctx, payload = {}) {
   parts.push(statusLine);
 
   const cancelBtn = h('button', { class: 'btn' }, '取消');
-  const submitBtn = h('button', { class: 'btn btn-primary' }, '初始化存储');
+  const submitBtn = h('button', { class: 'btn btn-primary' }, remount ? '重新挂载' : '初始化存储');
   submitBtn.disabled = !admin.available;
   if (!admin.available) submitBtn.title = '当前没有可用的提权方式';
 
   const dialog = modal({
-    title: '初始化 C 固定大小存储',
-    subtitle: '一次性操作；只创建/挂载固定的 workspace 文件系统，不删除已有数据。',
+    title: remount ? '重新挂载 C 固定大小存储' : '初始化 C 固定大小存储',
+    subtitle: remount
+      ? '挂载已有 ext4 镜像；不会格式化、重建或删除已有数据。'
+      : '一次性操作；只创建/挂载固定的 workspace 文件系统，不删除已有数据。',
     body: h('div', {}, ...parts),
     footer: [cancelBtn, submitBtn],
     onClose: () => {

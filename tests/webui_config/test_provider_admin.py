@@ -236,6 +236,17 @@ def test_update_reasoning_style(presets):
     assert cfg.providers["deepseek_main"].reasoning_style == "none"
 
 
+def test_update_reasoning_effort_style(presets):
+    """本地反代可显式开启 reasoning_effort，档位才会真正发出。"""
+    cfg = _minimal_config()
+    update_provider(
+        cfg, FakeSecrets(), "deepseek_main",
+        ProviderPayload(reasoning_effort_style="openai"),
+        presets=presets,
+    )
+    assert cfg.providers["deepseek_main"].reasoning_effort_style == "openai"
+
+
 def test_update_rejects_unknown_reasoning_style(presets):
     cfg = _minimal_config()
     with pytest.raises(ProviderAdminError):

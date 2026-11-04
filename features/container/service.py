@@ -16,6 +16,7 @@ falls back silently when it is not ready.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
 import json
@@ -116,6 +117,51 @@ entries.sort(key=lambda item: (item["type"] != "dir", item["name"].casefold()))
 print(json.dumps({"entries": entries, "truncated": truncated}, ensure_ascii=False))
 '''
 
+_IMAGE_SCRIPT = r'''
+import base64, json, os, stat, sys
+
+def fail(message, code):
+    print(json.dumps({"error": message, "code": code}, ensure_ascii=False))
+    raise SystemExit(2)
+
+path = sys.argv[1]
+try:
+    limit = max(1, int(sys.argv[2]))
+except (IndexError, ValueError):
+    limit = 8 * 1024 * 1024
+
+if os.path.realpath(path) != os.path.abspath(path):
+    fail("不允许通过符号链接读取文件", "symlink")
+try:
+    st = os.stat(path, follow_symlinks=False)
+except FileNotFoundError:
+    fail("文件不存在", "not_found")
+except PermissionError:
+    fail("没有权限读取该文件", "permission_denied")
+except OSError:
+    fail("无法读取文件", "read_failed")
+if not stat.S_ISREG(st.st_mode):
+    fail("路径不是普通文件", "not_file")
+if int(st.st_size) > limit:
+    fail("图片超过文件管理器的预览上限", "too_large")
+try:
+    with open(path, "rb") as handle:
+        data = handle.read(limit + 1)
+except PermissionError:
+    fail("没有权限读取该文件", "permission_denied")
+except OSError:
+    fail("无法读取文件", "read_failed")
+if len(data) > limit:
+    fail("图片超过文件管理器的预览上限", "too_large")
+print(json.dumps({
+    "name": os.path.basename(path),
+    "size": int(st.st_size),
+    "mtime": float(st.st_mtime),
+    "mode": format(stat.S_IMODE(st.st_mode), "04o"),
+    "data": base64.b64encode(data).decode("ascii"),
+}, ensure_ascii=False))
+'''
+
 _PREVIEW_SCRIPT = r'''
 import json, os, stat, sys
 
@@ -203,6 +249,33 @@ def _validate_container_path(path: str, *, allow_root: bool = False) -> str:
     return normalized
 
 
+def _validate_container_view_path(
+    path: str, *, allow_root: bool = False
+) -> str:
+    """Validate read-only file-manager paths.
+
+    The file manager may inspect the whole container filesystem, unlike the
+    model-facing write/read tools which stay inside ``/workspace``.  The helper
+    scripts still refuse symlinks, and no write action accepts these paths.
+    """
+    text = str(path or "").strip()
+    if not text or not text.startswith("/"):
+        raise ContainerError(
+            "容器路径必须是绝对路径",
+            code="container_path_invalid",
+        )
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        raise ContainerError("容器路径包含控制字符", code="container_path_invalid")
+    if ".." in text.split("/"):
+        raise ContainerError("容器路径不允许 ..", code="container_path_invalid")
+    normalized = posixpath.normpath(text)
+    if normalized == "/":
+        if allow_root:
+            return normalized
+        raise ContainerError("该操作需要具体文件路径", code="container_path_invalid")
+    return normalized
+
+
 def _resolve_host_workspace_path(workspace_dir: Path | None, raw: str) -> Path:
     if workspace_dir is None:
         raise ContainerError(
@@ -246,6 +319,7 @@ def _file_error(payload: dict[str, Any]) -> ContainerError:
         "permission_denied": "container_file_permission_denied",
         "read_failed": "container_file_read_failed",
         "symlink": "container_symlink_forbidden",
+        "too_large": "container_file_too_large",
     }
     return ContainerError(message, code=mapping.get(code, "container_file_read_failed"))
 
@@ -299,6 +373,8 @@ class ContainerService:
         self._idle_task: asyncio.Task[None] | None = None
         self._last_used = time.monotonic()
         self._closed = False
+        self._config_warning: dict[str, str] | None = None
+        self._file_ready_until = 0.0
 
     @property
     def enabled(self) -> bool:
@@ -440,6 +516,7 @@ class ContainerService:
                 "network": str(getattr(self.config, "network", "none")),
             },
             "storage": self.storage.status(include_host_paths=True).as_dict(),
+            "config_warning": self._config_warning,
         }
         if not include_docker:
             return data
@@ -477,6 +554,29 @@ class ContainerService:
                     "exists": state is not None,
                     "state": state or "absent",
                 }
+                if state is not None:
+                    try:
+                        managed, signature, failure = (
+                            await self._existing_config_status()
+                        )
+                        if failure or not managed:
+                            self._config_warning = {
+                                "code": "container_config_unverified",
+                                "message": (
+                                    "无法验证已有容器的创建配置；请确认容器由 "
+                                    "KarenBot 创建。"
+                                ),
+                            }
+                        elif signature != self._config_signature():
+                            self._config_warning = self._config_drift_warning()
+                        else:
+                            self._config_warning = None
+                        data["config_warning"] = self._config_warning
+                    except Exception:  # noqa: BLE001 - status must stay read-only
+                        logger.debug("读取容器配置标签失败", exc_info=True)
+                else:
+                    self._config_warning = None
+                    data["config_warning"] = None
             except ContainerError:
                 data["container"] = {
                     "name": self.name,
@@ -735,26 +835,58 @@ class ContainerService:
             )
         ).hexdigest()
 
-    async def _assert_existing_config(self) -> None:
+    async def _existing_config_status(self) -> tuple[bool, str, str]:
+        """Return (managed, stored signature, failure code) for the container.
+
+        A configuration change used to make every operation fail with
+        ``container_config_mismatch`` and force a rebuild.  That threw away
+        packages and other files that live in the container layer even though
+        the persistent workspace was preserved.  The current container is now
+        kept in service and the user gets a warning about settings that only
+        apply after an explicit rebuild.
+        """
         result = await self._run(
             [
                 "inspect",
                 "--format",
+                '{{ index .Config.Labels "karen.managed" }}|'
                 '{{ index .Config.Labels "karen.config" }}',
                 self.name,
             ],
             timeout=10.0,
         )
         if result.returncode != 0:
+            return False, "", "container_config_unverified"
+        managed_text, separator, signature = result.stdout.strip().partition("|")
+        if not separator:
+            return False, "", "container_config_unverified"
+        managed = managed_text.strip().lower() == "true"
+        return managed, signature.strip(), ""
+
+    def _config_drift_warning(self) -> dict[str, str]:
+        return {
+            "code": "container_config_drift",
+            "message": (
+                "容器创建后设置发生了变化。为保留容器内现有文件，系统继续使用"
+                "当前容器，不会自动重置；新的内存、CPU、网络、单文件上限或镜像"
+                "设置会在显式重建容器后全部生效，工作区持久数据不受重建影响。"
+            ),
+        }
+
+    async def _assert_existing_config(self) -> None:
+        managed, signature, failure = await self._existing_config_status()
+        if failure or not managed:
             raise ContainerError(
                 "无法验证已有容器配置；请执行 karen container reset 重建",
                 code="container_config_unverified",
             )
-        if result.stdout.strip() != self._config_signature():
-            raise ContainerError(
-                "容器配置已变化；请执行 karen container reset 重建（持久数据保留）",
-                code="container_config_mismatch",
+        if signature != self._config_signature():
+            self._config_warning = self._config_drift_warning()
+            logger.warning(
+                "容器配置与当前设置不一致，继续使用现有容器（不会自动重建）"
             )
+            return
+        self._config_warning = None
 
     def _create_args(self, mount_args: list[str]) -> list[str]:
         memory = int(getattr(self.config, "memory_mb", 512))
@@ -1028,6 +1160,25 @@ class ContainerService:
             "truncated": result.truncated,
         }
 
+    async def _ensure_running_for_files(self) -> None:
+        """Fast path for consecutive file-manager directory reads.
+
+        ``ensure_running`` performs several Docker probes that are useful before
+        the first operation but add avoidable latency when navigating folders.
+        For a short window, verify the container is still running and skip the
+        repeated server/image/config checks; a stopped or replaced container
+        falls back to the full path.
+        """
+        if time.monotonic() < self._file_ready_until:
+            try:
+                if await self._container_state() == "running":
+                    self._touch()
+                    return
+            except Exception:  # noqa: BLE001
+                logger.debug("快速检查容器状态失败，回退完整启动检查", exc_info=True)
+        await self.ensure_running()
+        self._file_ready_until = time.monotonic() + 10.0
+
     async def browse_files(self, path: str = _CONTAINER_WORKDIR) -> dict[str, Any]:
         """Structured directory listing for the WebUI file manager.
 
@@ -1036,8 +1187,8 @@ class ContainerService:
         ``ls`` output. The helper never follows symlinks for metadata and the
         WebUI does not offer a way to open them.
         """
-        target = _validate_container_path(path, allow_root=True)
-        await self.ensure_running()
+        target = _validate_container_view_path(path, allow_root=True)
+        await self._ensure_running_for_files()
         result = await self._run(
             [
                 "exec",
@@ -1110,9 +1261,7 @@ class ContainerService:
                 }
             )
         entries.sort(key=lambda item: (item["type"] != "dir", item["name"].casefold()))
-        parent = None if target == _CONTAINER_WORKDIR else (
-            posixpath.dirname(target) or _CONTAINER_WORKDIR
-        )
+        parent = None if target == "/" else (posixpath.dirname(target) or "/")
         return {
             "ok": True,
             "path": target,
@@ -1127,9 +1276,9 @@ class ContainerService:
         self, path: str, *, max_bytes: int = _MAX_PREVIEW_BYTES
     ) -> dict[str, Any]:
         """Return a bounded text preview; binary files never send bytes to UI."""
-        target = _validate_container_path(path)
+        target = _validate_container_view_path(path)
         limit = max(1, min(int(max_bytes), _MAX_PREVIEW_BYTES))
-        await self.ensure_running()
+        await self._ensure_running_for_files()
         result = await self._run(
             [
                 "exec",
@@ -1193,6 +1342,69 @@ class ContainerService:
         except (TypeError, ValueError):
             return None
         return payload if isinstance(payload, dict) else None
+
+    async def read_image(
+        self, path: str, *, max_bytes: int = 8 * 1024 * 1024
+    ) -> dict[str, Any]:
+        """Return bounded image bytes for the read-only WebUI file manager."""
+        target = _validate_container_view_path(path)
+        limit = max(1, min(int(max_bytes), 8 * 1024 * 1024))
+        await self._ensure_running_for_files()
+        result = await self._run(
+            [
+                "exec",
+                self.name,
+                "python3",
+                "-c",
+                _IMAGE_SCRIPT,
+                target,
+                str(limit),
+            ],
+            timeout=30.0,
+            max_output_bytes=max(limit * 2, 64 * 1024),
+            raise_on_timeout=False,
+        )
+        self._touch()
+        if result.timed_out:
+            raise ContainerError("读取图片超时", code="container_timeout")
+        if result.returncode != 0:
+            payload = self._parse_file_payload(result)
+            if payload is not None:
+                raise _file_error(payload)
+            if "python3" in result.stderr.lower():
+                raise ContainerError(
+                    "容器内缺少 python3，文件管理器暂不可用",
+                    code="container_file_manager_unavailable",
+                )
+            raise ContainerError("读取容器图片失败", code="container_file_read_failed")
+        if result.truncated:
+            raise ContainerError(
+                "图片超过文件管理器的预览上限", code="container_file_too_large"
+            )
+        payload = self._parse_file_payload(result)
+        if payload is None or payload.get("error"):
+            raise _file_error(payload or {})
+        encoded = str(payload.get("data") or "")
+        try:
+            data = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            raise ContainerError(
+                "容器返回的图片数据无效", code="container_file_read_failed"
+            ) from None
+        if len(data) > limit:
+            raise ContainerError(
+                "图片超过文件管理器的预览上限", code="container_file_too_large"
+            )
+        return {
+            "ok": True,
+            "path": target,
+            "name": _safe_file_text(payload.get("name"), 512)
+            or posixpath.basename(target),
+            "size": max(0, int(payload.get("size") or 0)),
+            "mtime": max(0.0, float(payload.get("mtime") or 0)),
+            "mode": _safe_file_text(payload.get("mode"), 32),
+            "data": data,
+        }
 
     async def import_file(
         self,
@@ -1276,10 +1488,12 @@ class ContainerService:
                 result = await self._run(["rm", "-f", self.name], timeout=30.0)
                 if result.returncode != 0:
                     raise _map_failure(result, default="container_reset_failed")
+        self._file_ready_until = 0.0
         self._touch()
         return {"ok": True, "reset": True, "volume_preserved": True}
 
     async def stop(self) -> None:
+        self._file_ready_until = 0.0
         try:
             state = await self._container_state()
             if state in {"running", "paused"}:

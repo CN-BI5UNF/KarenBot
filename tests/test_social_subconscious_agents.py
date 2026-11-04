@@ -297,6 +297,21 @@ async def test_social_agent_should_act_maps_valid_json_decisions(decision, expec
 
 
 @pytest.mark.asyncio
+async def test_social_agent_empty_context_adds_user_fallback_for_gemini():
+    """Gemini 反代不接受只有 system 的请求，空上下文要补一条中性 user 消息。"""
+    provider = FakeProvider([_decision("skip")])
+    agent = SocialAgent(provider, AgentConfig(provider="fake", model="social"))
+
+    assert (await agent.decide([]))["decision"] == "skip"
+    messages = provider.calls[0]["messages"]
+    assert any(
+        message.get("role") == "user" and message.get("content")
+        for message in messages
+    )
+    assert any(message.get("role") == "system" for message in messages)
+
+
+@pytest.mark.asyncio
 async def test_social_agent_malformed_json_retries_once_then_falls_back():
     provider = FakeProvider(["not-json", "{bad"])
     agent = SocialAgent(provider, AgentConfig(provider="fake", model="social"))

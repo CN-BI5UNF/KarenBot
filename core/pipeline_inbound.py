@@ -104,14 +104,23 @@ class PipelineInboundMixin:
 
         # 重建可读文本（CQ 码 + 媒体）
         text = await self._build_readable_text(event)
-        if event.is_group() and not self._group_selection_allows(event, text):
-            logger.info(
-                "群聊接收范围过滤 conversation_id=%s group_id=%s msg_id=%s",
-                conversation_id,
-                event.group_id,
-                event.message_id,
-            )
-            return
+        if event.is_group():
+            if not self._group_selection_allows(event, text):
+                logger.info(
+                    "群聊接收范围过滤 conversation_id=%s group_id=%s msg_id=%s",
+                    conversation_id,
+                    event.group_id,
+                    event.message_id,
+                )
+                return
+            if not self._group_trigger_allows(event, text):
+                logger.info(
+                    "群聊 @ 触发过滤 conversation_id=%s group_id=%s msg_id=%s",
+                    conversation_id,
+                    event.group_id,
+                    event.message_id,
+                )
+                return
         await self._notify_subconscious_inbound(event, text)
         self._inbound_seq += 1
         inbound_seq = self._inbound_seq
@@ -328,10 +337,7 @@ class PipelineInboundMixin:
         self.group_chat_selection = selection
         return selection.snapshot()
 
-    def _group_selection_allows(self, event: IncomingMessage, text: str) -> bool:
-        selection = getattr(self, "group_chat_selection", None)
-        if selection is None or not selection.is_active():
-            return True
+    def _is_group_mention(self, event: IncomingMessage, text: str) -> bool:
         role_name = ""
         persona = getattr(self, "persona", None)
         display_name = getattr(persona, "display_name", None)
@@ -342,12 +348,65 @@ class PipelineInboundMixin:
                 role_name = ""
         if not role_name:
             role_name = str(getattr(persona, "name", "") or "")
-        is_mention = _text_mentions_self_or_role(
+        return _text_mentions_self_or_role(
             text,
             str(getattr(event, "self_id", "") or ""),
             role_name,
         )
-        return selection.allows(event.group_id, is_mention)
+
+    def _group_selection_allows(self, event: IncomingMessage, text: str) -> bool:
+        selection = getattr(self, "group_chat_selection", None)
+        if selection is None or not selection.is_active():
+            return True
+        return selection.allows(
+            event.group_id,
+            self._is_group_mention(event, text),
+        )
+
+    def apply_group_trigger_config(self, config: Any) -> dict[str, Any]:
+        """Hot-apply the per-group @ trigger rules from the settings API."""
+        manager = getattr(self, "group_trigger", None)
+        if manager is None:
+            return {"enabled": False, "rules": 0, "windows": []}
+        manager.configure(config)
+        return {
+            "enabled": bool(manager.enabled),
+            "rules": manager.rule_count,
+            "windows": manager.snapshots(),
+        }
+
+    def apply_group_trigger_window(
+        self,
+        *,
+        action: str,
+        group_ids: list[int] | None = None,
+        duration_minutes: int = 30,
+        reason: str = "",
+        default_group_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Update a transient receive window from the tool layer."""
+        manager = getattr(self, "group_trigger", None)
+        if manager is None:
+            raise ValueError("群聊 @ 触发暂不可用")
+        return manager.apply_tool_action(
+            action=action,
+            group_ids=group_ids,
+            duration_minutes=duration_minutes,
+            reason=reason,
+            default_group_id=default_group_id,
+        )
+
+    def _group_trigger_allows(self, event: IncomingMessage, text: str) -> bool:
+        manager = getattr(self, "group_trigger", None)
+        if manager is None or not manager.enabled:
+            return True
+        if not manager.is_configured(event.group_id or ""):
+            return True
+        decision = manager.on_inbound(
+            event.group_id or "",
+            self._is_group_mention(event, text),
+        )
+        return decision.allowed
 
     async def _should_buffer_inbound_for_working_persona(self) -> bool:
         """人格处于「工作」状态时不直接唤起主模型。"""
@@ -445,6 +504,14 @@ class PipelineInboundMixin:
         persona_agent = getattr(self, "persona_agent", None)
         if persona_agent is None:
             return False
+        settle = getattr(persona_agent, "settle_expired_action", None)
+        if callable(settle):
+            try:
+                result = settle()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                logger.debug("到点动作结算失败，继续按当前状态处理", exc_info=True)
         is_resting = getattr(persona_agent, "is_resting", None)
         if is_resting is not None:
             try:

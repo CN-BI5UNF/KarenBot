@@ -23,6 +23,9 @@ def test_model_management_hosts_provider_and_local_panels():
     assert "model_vendor" in providers
     assert "上游模型厂商" in providers
     assert "detectModelVendor" in providers
+    assert "REASONING_EFFORT_STYLES" in providers
+    assert "reasoning_effort_style" in providers
+    assert "思考强度传递" in providers
 
 
 def test_sidebar_has_icon_only_collapse():

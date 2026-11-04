@@ -37,6 +37,7 @@ from . import (
     storage,
     system,
     update,
+    workspace,
 )
 
 # 注册顺序即 OpenAPI 里的分组顺序
@@ -56,6 +57,7 @@ ALL_ROUTERS = [
     providers.router,
     settings.router,
     container.router,
+    workspace.router,
     storage.router,
     context.router,
     update.router,

@@ -396,6 +396,15 @@ def _ai_no_action(reason: str = "无需回复") -> CompletionResult:
     return CompletionResult(tool_calls=[tc], finish_reason="tool_calls")
 
 
+def _ai_load_toolset(name: str) -> CompletionResult:
+    tc = ToolCall(
+        id=f"tc-load-{name}",
+        name="load_toolset",
+        arguments=json.dumps({"name": name}),
+    )
+    return CompletionResult(tool_calls=[tc], finish_reason="tool_calls")
+
+
 def _ai_tool_search(tool_name: str) -> CompletionResult:
     tc = ToolCall(
         id=f"tc-search-{tool_name}",

@@ -234,6 +234,16 @@ export const endpoints = {
   uploadModel: (name, formData) =>
     api.upload(`/api/models/${encodeURIComponent(name)}/upload`, formData),
 
+  workspaceFiles: (path = '/') =>
+    api.get(`/api/workspace/files?path=${encodeURIComponent(path)}`, {
+      timeoutMs: 30000,
+    }),
+  workspaceFileContent: (path) =>
+    api.get(`/api/workspace/files/content?path=${encodeURIComponent(path)}`, {
+      timeoutMs: 30000,
+    }),
+  workspaceFileRawUrl: (path) =>
+    `/api/workspace/files/raw?path=${encodeURIComponent(path)}`,
   containerStatus: () => api.get('/api/container/status', { timeoutMs: 30000 }),
   containerStorage: () => api.get('/api/container/storage', { timeoutMs: 30000 }),
   containerStorageSetup: (payload = {}) =>
@@ -246,6 +256,8 @@ export const endpoints = {
     api.get(`/api/container/files/content?path=${encodeURIComponent(path)}`, {
       timeoutMs: 60000,
     }),
+  containerFileRawUrl: (path) =>
+    `/api/container/files/raw?path=${encodeURIComponent(path)}`,
   containerTest: () => api.post('/api/container/test', {}, { timeoutMs: 660000 }),
   containerReset: () => api.post('/api/container/reset', {}, { timeoutMs: 60000 }),
 
@@ -272,6 +284,8 @@ export const endpoints = {
 
   accessLists: () => api.get('/api/settings/lists'),
   saveAccessLists: (payload) => api.put('/api/settings/lists', payload),
+  groupTriggers: () => api.get('/api/settings/group-triggers'),
+  saveGroupTriggers: (payload) => api.put('/api/settings/group-triggers', payload),
   blacklist: () => api.get('/api/settings/blacklist'),
   saveBlacklist: (payload) => api.put('/api/settings/blacklist', payload),
 

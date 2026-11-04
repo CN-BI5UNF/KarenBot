@@ -25,7 +25,7 @@ class FakeService:
         return {
             "ok": True,
             "path": path,
-            "parent": "/workspace" if path != "/workspace" else None,
+            "parent": None if path == "/" else (path.rsplit("/", 1)[0] or "/"),
             "entries": [],
             "count": 0,
         }
@@ -34,13 +34,17 @@ class FakeService:
         self.paths.append(path)
         return {"ok": True, "path": path, "content": "hello", "binary": False}
 
+    async def read_image(self, path):
+        self.paths.append(path)
+        return {"data": b"\x89PNG\r\n\x1a\nrest", "path": path}
+
 
 @pytest.mark.asyncio
 async def test_files_endpoint_delegates_path_and_returns_structured_result():
     service = FakeService()
     data = await container_api.container_files(_request(service), "/workspace")
     assert data["ok"] is True
-    assert data["parent"] is None
+    assert data["parent"] == "/"
     assert service.paths == ["/workspace"]
     preview = await container_api.container_file_content(
         _request(service), "/workspace/a.txt"
@@ -62,3 +66,24 @@ async def test_files_endpoint_maps_container_errors():
     assert error.value.status_code == 400
     assert error.value.detail["code"] == "container_not_directory"
     assert "不是目录" in error.value.detail["message"]
+
+
+@pytest.mark.asyncio
+async def test_files_endpoint_rejects_paths_outside_container_workspace():
+    service = FakeService()
+    with pytest.raises(HTTPException) as error:
+        await container_api.container_files(_request(service), "/etc")
+    assert error.value.status_code == 400
+    assert error.value.detail["code"] == "container_path_forbidden"
+    assert service.paths == []
+
+
+@pytest.mark.asyncio
+async def test_file_raw_endpoint_returns_image_bytes():
+    service = FakeService()
+    response = await container_api.container_file_raw(
+        _request(service), "/workspace/pic.png"
+    )
+    assert response.media_type == "image/png"
+    assert response.body.startswith(b"\x89PNG")
+    assert service.paths == ["/workspace/pic.png"]

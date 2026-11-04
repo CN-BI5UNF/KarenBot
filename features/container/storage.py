@@ -167,7 +167,7 @@ class ContainerStorage:
             marker_code = "container_storage_size_mismatch"
         mounted = self._is_mount()
         if not mounted and not marker_error:
-            marker_error = "固定大小存储未挂载；请执行 setup 或检查挂载状态"
+            marker_error = "固定大小存储未挂载；请执行 setup 或检查挂载状态（宿主机重启后需要重新挂载，可加入 /etc/fstab）"
             marker_code = "container_storage_not_mounted"
         free_bytes: int | None = None
         try:

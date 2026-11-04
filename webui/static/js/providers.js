@@ -29,6 +29,13 @@ const REASONING_STYLES = [
   ['none', 'none — 什么都不发（不认识的中转站用这个）'],
 ];
 
+const REASONING_EFFORT_STYLES = [
+  ['', '跟随预设（自定义则不发送）'],
+  ['none', 'none — 不发送 reasoning_effort'],
+  ['openai', 'openai — 发送 reasoning_effort（OpenAI / Gemini 反代）'],
+  ['deepseek', 'deepseek — 发送 reasoning_effort（DeepSeek 风格）'],
+];
+
 const CUSTOM = '__custom__';
 const VENDOR_LABELS = {
   gemini: 'Google Gemini',
@@ -184,17 +191,17 @@ function providerTable(providers, onChanged) {
         h('div', { class: 'row', style: { gap: '4px' } },
           h('button', {
             class: 'btn btn-sm',
-            title: '测试连接',
+            title: '测试连接（不会保存配置）',
             onclick: (event) => runTest(event.currentTarget, p, onChanged),
           }, icon('plug', { size: 14 })),
           h('button', {
             class: 'btn btn-sm',
-            title: '编辑',
+            title: '编辑提供商与模型列表',
             onclick: () => openProviderDialog(p, onChanged),
           }, icon('edit', { size: 14 })),
           h('button', {
             class: 'btn btn-sm btn-danger',
-            title: '删除',
+            title: '删除提供商（需要确认）',
             onclick: () => removeProvider(p, onChanged),
           }, icon('delete', { size: 14 })),
         ),
@@ -359,6 +366,16 @@ export function providerFields(state, {
   }
   styleSelect.value = p.reasoning_style || '';
 
+  const effortStyleSelect = h('select', {
+    onchange: (e) => { p.reasoning_effort_style = e.target.value; },
+  });
+  for (const [value, label] of REASONING_EFFORT_STYLES) {
+    effortStyleSelect.append(h('option', {
+      value, selected: (p.reasoning_effort_style || '') === value,
+    }, label));
+  }
+  effortStyleSelect.value = p.reasoning_effort_style || '';
+
   const timeoutInput = h('input', {
     type: 'number', min: '1', step: '1',
     value: p.timeout_seconds || 120,
@@ -380,12 +397,14 @@ export function providerFields(state, {
     display_name: p.display_name || '',
     base_url: p.base_url || '',
     reasoning_style: p.reasoning_style || '',
+    reasoning_effort_style: p.reasoning_effort_style || '',
   };
   const rememberCustom = () => {
     customValues.protocol = p.protocol || 'openai_compat';
     customValues.display_name = p.display_name || '';
     customValues.base_url = p.base_url || '';
     customValues.reasoning_style = p.reasoning_style || '';
+    customValues.reasoning_effort_style = p.reasoning_effort_style || '';
   };
   let lastChosen = presetSelect.value;
 
@@ -399,11 +418,13 @@ export function providerFields(state, {
       p.display_name = customValues.display_name;
       p.base_url = customValues.base_url;
       p.reasoning_style = customValues.reasoning_style;
+      p.reasoning_effort_style = customValues.reasoning_effort_style;
       protocolSelect.value = customValues.protocol;
       protocolSelect.disabled = false;
       displayNameInput.value = customValues.display_name;
       baseUrlInput.value = customValues.base_url;
       styleSelect.value = customValues.reasoning_style;
+      effortStyleSelect.value = customValues.reasoning_effort_style;
       return;
     }
     const preset = available.find((x) => x.id === chosen);
@@ -412,11 +433,13 @@ export function providerFields(state, {
     p.display_name = preset.display_name;
     p.base_url = preset.base_url;
     p.reasoning_style = preset.reasoning_style || '';
+    p.reasoning_effort_style = preset.reasoning_effort_style || '';
     protocolSelect.value = preset.protocol;
     protocolSelect.disabled = true;
     displayNameInput.value = preset.display_name;
     baseUrlInput.value = preset.base_url;
     styleSelect.value = preset.reasoning_style || '';
+    effortStyleSelect.value = preset.reasoning_effort_style || '';
     if (!p.model && preset.models && preset.models.length) {
       p.model = preset.models[0].id;
       modelInput.value = p.model;
@@ -465,6 +488,8 @@ export function providerFields(state, {
       p.has_key ? '留空表示不改动已保存的密钥' : '只写进密钥库，不会回显'),
     field('思考参数风格', styleSelect,
       '中转站拿不准就选 none —— 不发任何厂商私有字段，最不容易被网关拒绝'),
+    field('思考强度传递', effortStyleSelect,
+      '端点支持 reasoning_effort 时选 openai（Gemini 本地反代也可用）；否则档位只会保存、不会发送'),
     h('div', { class: 'grid grid-2' },
       field('超时（秒）', timeoutInput),
       field('模型 ID', h('div', {}, modelInput,
@@ -474,8 +499,8 @@ export function providerFields(state, {
 
   return {
     nodes, idInput, presetSelect, vendorSelect, protocolSelect, baseUrlInput,
-    modelInput, keyInput, keyToggle, styleSelect, timeoutInput, statusLine,
-    setStatus, syncFromPreset, refreshVendorHint,
+    modelInput, keyInput, keyToggle, styleSelect, effortStyleSelect,
+    timeoutInput, statusLine, setStatus, syncFromPreset, refreshVendorHint,
   };
 }
 
@@ -526,6 +551,7 @@ async function openProviderDialog(existing, onDone, knownPresets = null, knownVe
           base_url: existing.base_url || '',
           model: '',
           reasoning_style: existing.reasoning_style || '',
+          reasoning_effort_style: existing.reasoning_effort_style || '',
           timeout_seconds: existing.timeout_seconds || 120,
           api_key: '',
           has_key: !!existing.has_key,
@@ -542,6 +568,7 @@ async function openProviderDialog(existing, onDone, knownPresets = null, knownVe
           base_url: '',
           model: '',
           reasoning_style: '',
+          reasoning_effort_style: '',
           timeout_seconds: 120,
           api_key: '',
           has_key: false,
@@ -571,6 +598,7 @@ async function openProviderDialog(existing, onDone, knownPresets = null, knownVe
       base_url: p.base_url || null,
       display_name: p.display_name || null,
       reasoning_style: p.reasoning_style || null,
+      reasoning_effort_style: p.reasoning_effort_style || null,
       timeout_seconds: p.timeout_seconds || null,
       model: p.model || null,
     };

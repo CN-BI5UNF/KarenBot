@@ -75,6 +75,7 @@ def build_combined_system_prompt(
     memory_mode: Literal["file", "rag"] = "file",
     eat_tool: bool = False,
     sleep_tool: bool = False,
+    tool_routing: bool = False,
 ) -> str:
     """组装**不可变** system 前缀（identity + persona + tools + 场景协议）。
 
@@ -87,6 +88,7 @@ def build_combined_system_prompt(
             只影响工具协议说明的写法。
         eat_tool: 本轮工具列表是否提供 eat。
         sleep_tool: 本轮工具列表是否提供 sleep。
+        tool_routing: 是否使用工具集双层路由（影响 tool_use_protocol 说明）。
 
     各段顺序（内容本身不变，顺序仅影响模型阅读）：
         critical:  core_rules（永不变）
@@ -119,6 +121,7 @@ def build_combined_system_prompt(
             memory_mode,
             eat_tool=eat_tool,
             sleep_tool=sleep_tool,
+            tool_routing=tool_routing,
         ).strip()
     )
 
@@ -402,6 +405,7 @@ def build_messages(
     persona_context: str = "",
     eat_tool: bool = False,
     sleep_tool: bool = False,
+    tool_routing: bool = False,
     user_event: str | None = None,
     cache_friendly_history: bool = False,
     model_view_policy: ModelViewPolicy | None = None,
@@ -424,6 +428,7 @@ def build_messages(
         persona_context: 动态人格状态上下文；无 current_context_record 时进入 task_context。
         eat_tool: 本轮工具列表是否提供 eat；普通 system prompt 路径透传到工具协议。
         sleep_tool: 本轮工具列表是否提供 sleep；普通 system prompt 路径透传到工具协议。
+        tool_routing: routed 工具集模式；只影响工具协议说明。
         user_event: 带外触发轮的尾部 user 事件。仅用于唤醒/主动/请求等没有真实用户消息的轮次。
         cache_friendly_history: True 时使用请求展示分区：稳定聊天前置、历史
             runtime/安全 no_action 后置；False 保持旧拼装顺序。
@@ -473,6 +478,7 @@ def build_messages(
         memory_mode=memory_mode,
         eat_tool=eat_tool,
         sleep_tool=sleep_tool,
+        tool_routing=tool_routing,
     )
     messages = [{"role": "system", "content": system_content}]
 

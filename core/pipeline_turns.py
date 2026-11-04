@@ -176,6 +176,12 @@ class PipelineTurnsMixin:
             )
             return
 
+        session_for = getattr(self, "_toolset_session_for", None)
+        toolset_session = (
+            session_for(conversation_id or record_conversation_id)
+            if callable(session_for)
+            else None
+        )
         ctx = self._build_tool_context(
             default_target=default_target,
             conversation_id=conversation_id,
@@ -185,11 +191,17 @@ class PipelineTurnsMixin:
             ),
             task_phase=task_phase,
             tool_policy=tool_policy,
+            toolset_session=toolset_session,
         )
         executor = self.tool_registry.get_executor(ctx)
         denied_tools = set(tool_denylist or ())
+        schemas_for = getattr(self, "_tool_schemas_for", None)
         tools_schema = _filter_tool_schemas(
-            self.tool_registry.get_schemas(),
+            (
+                schemas_for(toolset_session)
+                if callable(schemas_for)
+                else self.tool_registry.get_schemas()
+            ),
             denied_tools,
         )
         if denied_tools:
@@ -333,9 +345,14 @@ class PipelineTurnsMixin:
                 return
             self._send_manager.begin_model_turn(conversation_id)
             try:
+                provider_for = getattr(self, "_tools_provider_for", None)
+                tools_provider = (
+                    provider_for(toolset_session) if callable(provider_for) else None
+                )
                 result = await self.chat_agent.run(
                     messages,
                     tools=tools_schema,
+                    tools_provider=tools_provider,
                     tool_executor=executor,
                     task_contract=task_contract,
                     pending_context_provider=(

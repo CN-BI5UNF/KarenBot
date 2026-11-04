@@ -143,6 +143,7 @@ class AgentRunner:
         *,
         tools: list[dict[str, Any]] | None,
         tool_executor: ToolExecutor,
+        tools_provider: Callable[[], list[dict[str, Any]] | None] | None = None,
         task_contract: str | None = None,
         pending_context_provider: Callable[[], Awaitable[list[dict[str, Any]]]] | None = None,
         pending_media_projector: Callable[
@@ -169,6 +170,8 @@ class AgentRunner:
         """执行多轮工具循环。
 
         Args:
+            tools_provider: 可选动态工具 schema 提供器。工具循环每轮开始前调用；
+                routed 模式在 load_toolset 后据此把新工具加入下一次请求。
             task_contract: 本轮的"任务合约"——一句话描述本轮目标。
                 每 refocus_interval 轮重注入一次到 messages 末尾，防止焦点漂移。
             model_view_policy: 新工具结果/pending runtime message 的逐条投影策略。
@@ -263,6 +266,10 @@ class AgentRunner:
                 break
 
             loop_count += 1
+            if tools_provider is not None:
+                refreshed_tools = tools_provider()
+                if refreshed_tools is not None:
+                    tools = refreshed_tools
 
             if await append_pending_context():
                 # 不额外消耗一次模型调用；只是保证下一次调用前上下文已追平。

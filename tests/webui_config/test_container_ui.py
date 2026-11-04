@@ -47,8 +47,18 @@ def test_container_page_nav_api_and_router_are_registered():
     assert "文件管理" in files_js
     assert "筛选当前目录" in files_js
     assert "二进制文件" in files_js
+    assert "本机工作区" in files_js
+    assert "容器工作区" in files_js
+    assert "容器根目录" not in files_js
+    assert "endpoints.workspaceFiles" in files_js
+    assert "endpoints.workspaceFileRawUrl" in files_js
+    assert "endpoints.containerFileRawUrl" in files_js
+    assert "CACHE_TTL_MS" in files_js
+    assert "config_warning" in page_js
     assert "endpoints.containerFiles" in files_js
     assert "endpoints.containerFileContent" in files_js
+    assert "pages/workspace.js" not in app_js
+    assert "key: 'workspace'" not in app_js
     assert "containerStatus:" in api_js
     assert "/api/container/status" in api_js
     assert "containerFiles:" in api_js

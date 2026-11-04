@@ -21,7 +21,12 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from app_config import user_error_text
-from app_config.schema import BlacklistConfig, WhitelistConfig
+from app_config.schema import (
+    BlacklistConfig,
+    GroupTriggerConfig,
+    GroupTriggerRuleConfig,
+    WhitelistConfig,
+)
 from webui.config_edit import apply_validated, validate_config
 from webui.settings_spec import SETTINGS_GROUPS, field_map
 
@@ -808,6 +813,80 @@ async def put_lists(
         "hot_applied": True,
         "message": "黑白名单已保存并立即生效",
         **_lists_json(rt),
+    }
+
+
+def _group_trigger_json(rt: Any) -> dict[str, Any]:
+    cfg = rt.config.features.group_trigger
+    pipeline = getattr(rt, "pipeline", None)
+    manager = getattr(pipeline, "group_trigger", None)
+    active_windows = manager.snapshots() if manager is not None else []
+    return {
+        "enabled": bool(cfg.enabled),
+        "groups": [
+            {
+                "group_id": int(rule.group_id),
+                "max_messages": int(rule.max_messages),
+                "window_minutes": int(rule.window_minutes),
+            }
+            for rule in cfg.groups
+        ],
+        "active_windows": active_windows,
+        "active_llm_groups": (
+            sorted(manager.llm_owned_group_ids()) if manager is not None else []
+        ),
+        "max_llm_groups": 2,
+        "hot_applied": True,
+    }
+
+
+@router.get("/group-triggers")
+async def get_group_triggers(request: Request) -> dict[str, Any]:
+    """Return per-group @-trigger rules and current transient windows."""
+    rt = require_runtime(request)
+    return {"ok": True, **_group_trigger_json(rt)}
+
+
+@router.put("/group-triggers")
+async def put_group_triggers(
+    request: Request,
+    payload: Annotated[GroupTriggerConfig, Body()],
+) -> dict[str, Any]:
+    """Replace the rule list and apply it without restarting Runtime."""
+    rt = require_runtime(request)
+    host = request.app.state.host
+    groups = [
+        GroupTriggerRuleConfig(
+            group_id=rule.group_id,
+            max_messages=rule.max_messages,
+            window_minutes=rule.window_minutes,
+        )
+        for rule in payload.groups
+    ]
+    replacement = GroupTriggerConfig(
+        enabled=bool(payload.enabled),
+        groups=groups,
+    )
+    apply_validated(
+        rt.config,
+        lambda draft: setattr(
+            draft.features, "group_trigger", replacement
+        ),
+    )
+    await asyncio.to_thread(host.save_config)
+    pipeline = getattr(rt, "pipeline", None)
+    if pipeline is not None:
+        pipeline.apply_group_trigger_config(rt.config.features.group_trigger)
+    logger.info(
+        "群聊 @ 触发规则已更新 enabled=%s groups=%s",
+        replacement.enabled,
+        [(rule.group_id, rule.max_messages, rule.window_minutes) for rule in replacement.groups],
+    )
+    return {
+        "ok": True,
+        "needs_restart": False,
+        "message": "群聊 @ 触发规则已保存并立即生效",
+        **_group_trigger_json(rt),
     }
 
 

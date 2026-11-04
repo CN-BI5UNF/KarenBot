@@ -459,17 +459,22 @@ class PipelineWorkingContextMixin:
         try:
             from agents.context_builder import build_admin_info, build_combined_system_prompt
 
+            routing_check = getattr(self, "_tool_routing_enabled", None)
+            routed = bool(routing_check()) if callable(routing_check) else False
             system_content = build_combined_system_prompt(
                 self.persona,
                 memory_mode=self.features_cfg.long_term_memory.mode,
                 eat_tool=bool(getattr(self, "eat_tool", False)),
                 sleep_tool=bool(getattr(self, "sleep_tool", False)),
+                tool_routing=routed,
             )
-            tools = (
-                self.tool_registry.get_schemas()
-                if getattr(self, "tool_registry", None) is not None
-                else None
-            )
+            tools = None
+            if getattr(self, "tool_registry", None) is not None:
+                tools = (
+                    self.tool_registry.get_routed_schemas()
+                    if routed
+                    else self.tool_registry.get_schemas()
+                )
             fixed_messages = [{"role": "system", "content": system_content}]
             admin_info = build_admin_info(self.persona)
             if admin_info:

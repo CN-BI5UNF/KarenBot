@@ -59,9 +59,111 @@
 - LLM 只能通过当前人格的只读引用访问形象；`delete_knowledge_note` 无法删除虚拟形象条目。
 - 黑白名单保存时对 QQ/群号去重、过滤非正数；黑名单仍优先于白名单和管理员审核。
 
-## [Unreleased] — 黑话搜索与容器文件管理
+## [Unreleased] — 工具提示与路由提示优化
 
 ### Added
+
+- WebUI 新增统一悬停提示层：启动时把 `title` 升级为 `data-tooltip`，统一延迟、
+  位置、主题和键盘焦点行为；原生 `title` 在脚本未加载时仍可作为后备。提示会保留
+  无障碍名称（`aria-label`），并随滚动、失焦和 Esc 关闭。
+- 侧栏每个页面增加一句用途提示；文件管理器的刷新、上级、面包屑和模式按钮补充了
+  更明确的动作说明；提供商和表情包的危险/常用操作提示也补充了后果。
+
+### Changed
+
+- 工具路由提示改为“先说明用途，再给路由要求”：stub 工具不再在每条描述里重复
+  “先用 tool_search”，而由占位参数和协议统一说明；routed 模式修复了
+  `list_toolsets` / `load_toolset` 描述退化成工具名的问题，并补充“按任务加载
+  1-2 个、不要一次加载全部”的提示。
+- routed 模式保留工具的中/高风险等级（例如 `run_python`、`delete_file`、
+  `set_group_ban`），`tool_search` 会明确告知工具是否已加载以及下一步操作。
+- 为 workspace、容器、上传和触发窗口等常用工具补充 `tool_search` 示例；工具集
+  目录说明补充适用边界（本机工作区 vs 容器、消息发送 vs 文件上传等）。
+- 实测 routed 初始 schema 约 2,980 tokens；compact 在测试配置约 5,063，启用容器等
+  额外工具时约 5,683 tokens。routed 初始仍低于 3,500 预算。
+
+### Fixed
+
+- 自定义 OpenAI-compatible provider 现在可以在 WebUI 选择「思考强度传递」风格；
+  对支持 `reasoning_effort` 的本地反代（如 Gemini 反代）选择 `openai` 后，聊天
+  配置的 `high` 会实际随请求发送，而不再只是保存在本地。
+- 社交决策在上下文为空时补一条中性 user 消息，避免 Gemini 兼容端点返回
+  `400 contents is not specified`；此前主动路由会因此跳过社交判断。
+
+## [Unreleased] — 工作区文件管理与图片预览
+
+### Added
+
+- 容器页文件管理新增「本机工作区」模式，直接浏览
+  `AppPaths.WORKSPACE_DIR`（通常是
+  `~/.local/share/Debata_Agent/instances/default/workspace`）；接口为
+  `GET /api/workspace/files`、`/files/content`。
+- 「容器工作区」保留，只读取容器 `/workspace`；删去「容器根目录」入口，
+  API 也只接受 `/workspace` 及其子路径。
+- 文件管理支持 PNG/JPEG/GIF/WebP/BMP 图片直接打开；新增
+  `/api/workspace/files/raw` 与 `/api/container/files/raw`，限制 8 MiB，
+  仅允许安全栅格格式。
+- 目录切换增加 15 秒前端缓存，并默认加载本机工作区，减少等待。
+
+### Changed
+
+- 「工作区」不再单独占用左侧导航，合并到「容器」页文件管理的模式切换中。
+- 更新 WebUI、容器、功能和 CHANGELOG 文档及 API/UI 测试。
+
+## [Unreleased] — 工具双层路由
+
+### Added
+
+- 新增实验性 `behavior.tool_schema_profile="routed"`：第一层用
+  `list_toolsets` / `load_toolset` 按需加载工具集，第二层保留
+  `tool_search detail=full` 查询单工具高级参数。
+- 新增 14 个可重叠工具集（core/control/messaging/qq_info/qq_admin/history/
+  memory/knowledge/slang/web/emoji/workspace/persona/container），并把全部
+  工具显式归类；未分类工具会在构建 registry 时直接报错。
+- routed 初始只暴露核心工具和路由入口（实测约 2,993 tokens），已加载集合按
+  会话在 Runtime 内存中保持；未加载工具调用返回 `need_toolset`。
+- 新增 `list_toolsets`、`load_toolset` 工具和 `toolsets` 元数据；
+  `tool_search` 会报告工具所属集合及是否已加载。
+
+### Changed
+
+- `AgentRunner` / `ChatAgent` 支持动态工具 schema provider：`load_toolset` 后，
+  下一次模型请求自动追加对应工具。
+- 设置 →「工具 schema 档位」新增 `routed（实验）`；默认仍为 `compact`，
+  `compact` / `full` 行为不变。
+- 更新架构、功能、README 和 [工具双层路由](docs/tool_routing.md) 文档。
+
+### Known limitations
+
+- routed 需要额外的工具集加载轮次；动态 tools 块可能降低 KV cache 命中。
+- 已加载集合不持久化，Runtime 重启后回到核心集合；子 Agent 使用固定工具集。
+
+## [Unreleased] — 容器与群聊触发
+
+### Added
+
+- 新增「群聊触发」页和 `GET/PUT /api/settings/group-triggers`：按群配置 @ 触发，
+  支持连续消息数和/或时间窗口，两者都填时先到者关闭；规则热更新，窗口状态仅存
+  Runtime 内存。
+- 新增 `group_trigger_window` 工具：模型可 `open` / `extend` / `close` / `status`
+  临时窗口，每次最多 2 个群、LLM 临时窗口最多同时覆盖 2 个群；任务上下文会显示
+  剩余条数/时间和即将结束提示。
+- 容器文件管理器改为只读浏览整个容器文件系统：默认根目录，提供 `/workspace`
+  快捷入口，支持任意绝对路径和文本预览；模型读写工具仍限制在 `/workspace`。
+
+### Changed
+
+- 容器配置变化不再以 `container_config_mismatch` 强制拒绝使用；继续使用现有容器
+  并在 WebUI 提示，新设置留到显式重建后生效，避免丢失容器层文件。工作区数据仍
+  受重建保护。
+- 更新容器、WebUI、功能和 README 文档及对应测试。
+
+### Fixed
+
+- 修复容器文件管理器只能查看 `/workspace`、无法查看容器内其它文件的问题。
+- 修复调整容器设置后频繁要求执行 `karen container reset` 的问题；显式重建仍可用。
+- 人格睡眠/进食/工作等动作改为到点独立结算，并在入站与回合结束时兜底，
+  避免后台维护间隔较长时一直停留在「进食中」等状态。
 
 - 黑话管理页新增搜索：可按词条、释义、用法、示例和风险提示查询，并与群号、状态筛选组合；`GET /api/slang?q=` 返回匹配条目和过滤后的统计。
 - 同群同名 AI 黑话申请自动拒绝：原词条不被改写，重复申请以 `rejected` + `duplicate_term` 记录保留在列表中并显示拒绝原因；启动时的旧重复合并不会删除这些记录。

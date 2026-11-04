@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 import agents.persona_agent as persona_agent_mod
@@ -713,3 +715,68 @@ async def test_sleep_start_consolidation_does_not_expose_tomorrow_monologue(monk
     assert db.saved[-1].last_monologue_at == 900.0
     assert "明早醒来后先整理计划。" not in agent.get_context_for_chat("private:u1")
     await agent.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_eat_action_settles_at_deadline_without_waiting_for_periodic_tick(monkeypatch):
+    """30 分钟进食到期后应立即结算，而不是等 90 分钟的定时维护。"""
+    import asyncio
+
+    agent = _agent(
+        FakeDB(PersonaState(satiety=5.0, last_tick_at=1000.0)),
+        pm_cfg=_pm_cfg(satiety="tool"),
+    )
+
+    async def no_llm_recovery(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(agent, "_llm_recovery_estimate", no_llm_recovery)
+    await agent.start()
+    try:
+        result = await agent.on_eat_start("午餐", 0.01, "米饭")
+        assert result["status"] == "started"
+        assert agent.get_state_snapshot().current_action == "eating"
+
+        for _ in range(60):
+            await asyncio.sleep(0.05)
+            if agent.get_state_snapshot().current_action == "awake":
+                break
+
+        snapshot = agent.get_state_snapshot()
+        assert snapshot.current_action == "awake"
+        assert snapshot.action_until is None
+        assert snapshot.satiety > 5.0
+    finally:
+        await agent.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_after_turn_settles_expired_action_before_status_update(monkeypatch):
+    import asyncio
+
+    agent = _agent(
+        FakeDB(PersonaState(satiety=5.0, last_tick_at=1000.0)),
+        pm_cfg=_pm_cfg(satiety="tool"),
+    )
+    await agent.start()
+    try:
+        async with agent._state_lock:
+            agent._state.current_action = "eating"
+            agent._state.action_until = time.time() - 1
+            agent._state.last_tick_at = time.time() - 60
+
+        async def no_llm_update(*_args, **_kwargs):
+            return None
+
+        async def no_llm_recovery(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(agent, "_llm_turn_update", no_llm_update)
+        monkeypatch.setattr(agent, "_llm_recovery_estimate", no_llm_recovery)
+        await agent.after_turn("private:1", [], "")
+        await asyncio.sleep(0)
+
+        assert agent.get_state_snapshot().current_action == "awake"
+        assert agent.get_state_snapshot().action_until is None
+    finally:
+        await agent.shutdown()

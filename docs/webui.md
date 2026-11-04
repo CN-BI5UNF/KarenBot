@@ -45,7 +45,7 @@ WebUI 能读到全部聊天记录、改配置、换 API Key，所以**默认必�
 
 ## 页面结构
 
-侧边栏顺序与原桌面仪表盘一致，末尾追加了 WebUI 新增的「黑白名单」：
+侧边栏顺序与原桌面仪表盘一致，新增「黑白名单」「群聊触发」等 WebUI 页面：
 
 | 页面 | 对应后端 | 原 GUI 来源 |
 |---|---|---|
@@ -60,6 +60,7 @@ WebUI 能读到全部聊天记录、改配置、换 API Key，所以**默认必�
 | **容器** | `webui/api/container.py` | 无（WebUI 新增；见 `docs/container.md`） |
 | **存储与数据** | `webui/api/storage.py` + `webui/api/admin.py` | 无（WebUI 新增；缓存清理见 `docs/storage_maintenance.md`，危险操作见 `docs/destructive_admin.md`） |
 | **黑白名单** | `webui/api/settings.py` | 无（WebUI 新增；白名单与黑名单合并） |
+| **群聊触发** | `webui/api/settings.py` | 无（WebUI 新增；按群 @ 触发窗口） |
 | 设置 | `webui/api/settings.py` | `ui/dashboard/settings_page.py` |
 
 > 「模型管理」同时管**云端 LLM 提供商/Agent 模型**和**本地插件模型**（TTS / 本地
@@ -312,6 +313,11 @@ Anthropic 映射为 thinking budget；其他未声明支持的供应商只保存
 预设内的模型使用 `preset.yaml` 的 `reasoning_effort_options`（模型级优先），
 不在预设模型清单里的自定义模型固定回退 `low/medium/high`。
 
+自定义 OpenAI-compatible provider（包括本机 Gemini 反代）在「模型管理 → 提供商」
+里还有「思考强度传递」选项：端点接受 `reasoning_effort` 时选 `openai`，否则保持
+`none`。选择 `openai` 后，Agent 的 `reasoning.budget` 才会作为 `reasoning_effort`
+随请求发送。
+
 设置 →「Token 预算」还会显示 C02 压缩状态（最近动作、跳过原因、退避剩余、
 增长 EWMA），并提供「立即压缩活跃历史」。手动压缩会等待摘要完成；后台压缩
 进行中返回忙碌，不会排队重复调用摘要模型。
@@ -333,6 +339,48 @@ https 输入。更新器只接受同一 `CN-BI5UNF/KarenBot` 仓库，拒绝 htt
 向导里填的人格描述同理也调不了生成器（要真发一次模型请求），但**不能就这么丢掉**：
 它被写进 `<数据目录>/persona_brief.json`，配置完成后「人格 → 新建人格」会读它预填，
 用过即删。
+
+## 容器页文件管理
+
+「容器」页的「文件管理」在同一个卡片内提供两个只读模式：
+
+- **本机工作区**：读取 `AppPaths.WORKSPACE_DIR`，通常是
+  `~/.local/share/Debata_Agent/instances/default/workspace`，这是模型文件工具
+  （`read_file` / `write_file` / `list_files` / `run_python`）使用的目录。
+  接口为 `GET /api/workspace/files`、`/files/content` 和 `/files/raw`；支持
+  目录列表、目录最多 1000 项、文本预览最多 128 KiB。
+- **容器工作区**：只读取容器 `/workspace`，对应
+  `.../container/workspace`；不再提供「容器根目录」浏览。接口为
+  `GET /api/container/files` 和 `/files/content`。
+
+两个模式都只读、不跟随符号链接、拒绝 `..`；目录列表短期缓存 15 秒以加快切换，
+刷新按钮会绕过缓存。PNG/JPEG/GIF/WebP/BMP 通过 `/files/raw` 接口直接打开，
+其他二进制文件只返回元数据。
+
+## 群聊触发
+
+左侧「群聊触发」页配置按群 @ 触发规则，接口为
+`GET/PUT /api/settings/group-triggers`。只有名单中的群受限制；未列出的群保持正常
+接收。每个群可设置：
+
+- `max_messages`：被 @ 后最多连续接收的普通消息数，0 表示不按条数关闭；
+- `window_minutes`：被 @ 后窗口最长分钟数，0 表示不按时间关闭；
+- 两者都填时先满足哪个就关闭；两者都为 0 时只接收 @ 消息。
+
+被 @ 后窗口会开启/刷新。窗口内的普通消息进入 pipeline，窗口外的普通消息在
+`core/pipeline_inbound.py` 直接被丢弃，不写历史/事件流，也不触发模型。规则保存后
+热更新，无需重启；窗口本身只存在 Runtime 内存中。
+
+模型侧有 `group_trigger_window` 工具：
+
+- `open`：临时放行 1-2 个群，时长由模型决定；
+- `extend`：延长即将结束的窗口（包括 @ 窗口），转换为 LLM 临时窗口；
+- `close`：提前关闭窗口；
+- `status`：查看活动窗口。
+
+LLM 临时窗口最多同时覆盖 2 个群。`task_context` 会显示当前窗口剩余条数/时间和
+「即将结束」提示，模型可在关闭前调用 `extend`；窗口已关闭时可用 `open` 重新开启。
+被过滤的消息不会送到模型，因此不能等窗口关闭后再延长。
 
 ## 黑白名单
 
@@ -365,6 +413,15 @@ blacklist:
 ```
 
   写成 `qq_ids: "111,222"` 会直接校验失败。
+
+## 悬停提示
+
+`webui/static/js/tooltip.js` 在启动时把元素的 `title` 升级为 `data-tooltip`，用统一
+浮层显示；未加载脚本时浏览器原生提示仍可用。提示层会补 `aria-label`、支持键盘
+聚焦、按 Esc/滚动/失焦关闭，并在视口边缘自动翻转或夹紧位置。
+
+新增图标按钮时写 `title`（动作 + 后果，例如「刷新当前目录（绕过缓存）」），不要
+只写“点击”或重复可见文字；测试见 `tests/webui_config/test_tooltip_ui.py`。
 
 ## 二次开发
 

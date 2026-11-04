@@ -41,6 +41,11 @@ def _service(ctx: ToolContext) -> Any:
     risk_level="high",
     search_tags=["container", "docker", "shell", "workspace", "exec"],
     short_description="在受控 Docker 容器内执行命令/读写文件。",
+    examples=[
+        {"action": "exec", "command": "python3 --version"},
+        {"action": "list_files", "path": "/workspace"},
+        {"action": "import_file", "host_path": "report.pdf", "container_path": "/workspace/report.pdf"},
+    ],
 )
 async def container(args: ContainerArgs, ctx: ToolContext) -> dict[str, Any]:
     try:

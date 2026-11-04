@@ -303,6 +303,9 @@ async def test_all_tools_have_clear_results_in_simulated_runtime(tmp_path, monke
         "sleep": {"duration_minutes": 90, "reason": "午休"},
         "work": {"duration_minutes": 60, "reason": "整理容器资料"},
         "chat_selection": {"mode": "all"},
+        "group_trigger_window": {"action": "status"},
+        "list_toolsets": {},
+        "load_toolset": {"name": "workspace"},
         "tool_search": {"tool_name": "upload_file", "intent": "测试工具详情查询"},
         "list_emoji": {},
         "save_emoji_from_url": {

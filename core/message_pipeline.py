@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,7 @@ from tools import (
     IWeatherService,
     IWebSearchService,
     ToolRegistry,
+    ToolsetSession,
 )
 from utils import get_time
 from utils.image_budget import resolve_image_budget_profile
@@ -86,6 +88,7 @@ from .agent_task_helpers import (
 )
 from .chat_timeline import ChatTimelineStore
 from .group_chat_selection import GroupChatSelection
+from .group_trigger import GroupTriggerManager
 from .media_pipeline import MediaPipelineMixin
 from .pipeline_agent_tasks import PipelineAgentTasksMixin
 from .pipeline_context import (
@@ -331,6 +334,10 @@ class MessagePipeline(
         self._work_watch_task: asyncio.Task | None = None
         # 群聊「聊天选择」：只影响群入站，私聊始终保留。
         self.group_chat_selection = GroupChatSelection()
+        # 用户配置的按群 @ 触发窗口；运行时状态仅在内存中。
+        self.group_trigger = GroupTriggerManager(
+            getattr(features_cfg, "group_trigger", None)
+        )
         # 退出 _batch_loop 后的兜底 task；保留引用避免 GC
         self._requeue_task: asyncio.Task | None = None
         self._summary_task: asyncio.Task | None = None
@@ -365,6 +372,8 @@ class MessagePipeline(
         # user-scoped important memories in group prompts.
         self._group_members_cache: dict[str, tuple[float, set[int]]] = {}
         self._group_members_ttl_seconds: float = 300.0
+        # routed schema profile: conversation_id -> loaded toolset ids.
+        self._toolset_sessions: OrderedDict[str, ToolsetSession] = OrderedDict()
         self._warn_context_compaction_invariants()
 
     @property
@@ -398,6 +407,43 @@ class MessagePipeline(
         self.whitelist = whitelist
         self._whitelist_qq_ids = {int(x) for x in whitelist.qq_ids}
         self._whitelist_group_ids = {int(x) for x in whitelist.group_ids}
+
+    def _tool_routing_enabled(self) -> bool:
+        return (
+            str(getattr(self.tool_registry, "schema_profile", "compact"))
+            == "routed"
+        )
+
+    def _toolset_session_for(self, conversation_id: str | None) -> ToolsetSession | None:
+        """Return the per-conversation routed toolset session, if enabled.
+
+        Routed state is memory-only: loaded sets survive model turns inside one
+        runtime process and are isolated by conversation id.
+        """
+        if not self._tool_routing_enabled():
+            return None
+        key = str(conversation_id or "global")
+        session = self._toolset_sessions.get(key)
+        if session is None:
+            session = ToolsetSession()
+            self._toolset_sessions[key] = session
+            # Keep the per-conversation routing state bounded on long-running
+            # multi-group bots; unloading the oldest idle conversation is safe.
+            if len(self._toolset_sessions) > 128:
+                self._toolset_sessions.popitem(last=False)
+        else:
+            self._toolset_sessions.move_to_end(key)
+        return session
+
+    def _tool_schemas_for(self, session: ToolsetSession | None):
+        if session is None:
+            return self.tool_registry.get_schemas()
+        return self.tool_registry.get_routed_schemas(session)
+
+    def _tools_provider_for(self, session: ToolsetSession | None):
+        if session is None:
+            return None
+        return lambda: self.tool_registry.get_routed_schemas(session)
 
     def mark_activity(self) -> None:
         """刷新活动时间。主动思考只在足够空闲后触发。"""
@@ -510,6 +556,7 @@ class MessagePipeline(
         latest_user_text = "\n".join(item.text for item in items)
         batch_trigger_message_ids = self._batch_trigger_message_ids(items)
         batch_focus_user_ids = self._batch_focus_user_ids(items, batch_trigger_message_ids)
+        toolset_session = self._toolset_session_for(conversation_id)
         ctx = self._build_tool_context(
             default_target=default_target,
             latest_user_text=latest_user_text,
@@ -520,9 +567,10 @@ class MessagePipeline(
             seen_inbound_seq=items[-1].inbound_seq if items else 0,
             focus_user_ids=batch_focus_user_ids,
             trigger_message_ids=batch_trigger_message_ids,
+            toolset_session=toolset_session,
         )
         executor = self.tool_registry.get_executor(ctx)
-        tools_schema = self.tool_registry.get_schemas()
+        tools_schema = self._tool_schemas_for(toolset_session)
         _log_slow_batch_stage(
             "build_tool_context_schema",
             stage_t0,
@@ -680,6 +728,7 @@ class MessagePipeline(
                 result = await self.chat_agent.run(
                     messages,
                     tools=tools_schema,
+                    tools_provider=self._tools_provider_for(toolset_session),
                     tool_executor=executor,
                     task_contract=None,  # 暂不强制 task contract，由 prompt 末尾的提示词承担焦点引导
                     pending_context_provider=lambda: self._consume_send_receipts(

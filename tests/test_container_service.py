@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -215,7 +216,7 @@ async def test_browse_files_returns_structured_sanitized_entries(tmp_path, monke
 
     result = await service.browse_files("/workspace")
 
-    assert result["parent"] is None
+    assert result["parent"] == "/"
     assert result["count"] == 3
     assert [item["name"] for item in result["entries"]] == [
         "notes",
@@ -231,15 +232,32 @@ async def test_browse_files_returns_structured_sanitized_entries(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_browse_files_rejects_paths_outside_workspace(tmp_path):
+async def test_browse_files_allows_container_root_but_rejects_traversal(tmp_path, monkeypatch):
     service = ContainerService(
         ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
         _paths(tmp_path),
         platform_name="Linux",
     )
+
+    async def no_start() -> None:
+        return None
+
+    async def fake_run(args, **kwargs):
+        return _ok(json.dumps({"entries": [], "truncated": False}))
+
+    monkeypatch.setattr(service, "ensure_running", no_start)
+    monkeypatch.setattr(service, "_run", fake_run)
+    result = await service.browse_files("/etc")
+    assert result["path"] == "/etc"
+    assert result["parent"] == "/"
+    root = await service.browse_files("/")
+    assert root["path"] == "/"
+    assert root["parent"] is None
+    workspace = await service.browse_files("/workspace")
+    assert workspace["parent"] == "/"
     with pytest.raises(ContainerError) as error:
-        await service.browse_files("/etc")
-    assert error.value.code == "container_path_forbidden"
+        await service.browse_files("/workspace/../etc/passwd")
+    assert error.value.code == "container_path_invalid"
 
 
 @pytest.mark.asyncio
@@ -308,6 +326,7 @@ async def test_preview_file_returns_text_and_binary_metadata(tmp_path, monkeypat
         return _ok(json.dumps(payloads.pop(0), ensure_ascii=False))
 
     monkeypatch.setattr(service, "ensure_running", no_start)
+    monkeypatch.setattr(service, "_ensure_running_for_files", no_start)
     monkeypatch.setattr(service, "_run", fake_run)
 
     text = await service.preview_file("/workspace/a.txt")
@@ -317,6 +336,72 @@ async def test_preview_file_returns_text_and_binary_metadata(tmp_path, monkeypat
     assert binary["binary"] is True
     assert binary["content"] == ""
     assert binary["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_preview_file_allows_read_only_paths_outside_workspace(tmp_path, monkeypatch):
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        platform_name="Linux",
+    )
+
+    async def no_start() -> None:
+        return None
+
+    async def fake_run(args, **kwargs):
+        assert args[5] == "/etc/hostname"
+        return _ok(
+            json.dumps(
+                {
+                    "name": "hostname",
+                    "path": "/etc/hostname",
+                    "size": 4,
+                    "mtime": 1700000000,
+                    "mode": "0644",
+                    "content": "karen",
+                    "binary": False,
+                    "truncated": False,
+                }
+            )
+        )
+
+    monkeypatch.setattr(service, "ensure_running", no_start)
+    monkeypatch.setattr(service, "_run", fake_run)
+    result = await service.preview_file("/etc/hostname")
+    assert result["content"] == "karen"
+
+
+@pytest.mark.asyncio
+async def test_read_image_returns_bounded_bytes(tmp_path, monkeypatch):
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        platform_name="Linux",
+    )
+
+    async def no_start() -> None:
+        return None
+
+    async def fake_run(args, **kwargs):
+        return _ok(
+            json.dumps(
+                {
+                    "name": "a.png",
+                    "size": 4,
+                    "mtime": 1700000000,
+                    "mode": "0644",
+                    "data": base64.b64encode(b"PNG!").decode("ascii"),
+                }
+            )
+        )
+
+    monkeypatch.setattr(service, "ensure_running", no_start)
+    monkeypatch.setattr(service, "_run", fake_run)
+    result = await service.read_image("/workspace/a.png")
+    assert result["data"] == b"PNG!"
+    assert result["name"] == "a.png"
+    assert result["size"] == 4
 
 
 @pytest.mark.asyncio
@@ -420,31 +505,40 @@ async def test_image_pull_failure_includes_sanitized_reason(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_existing_container_with_lost_config_signature_must_be_reset(tmp_path):
+async def test_existing_container_with_lost_config_signature_keeps_running(tmp_path):
     class ExistingDocker(FakeDocker):
-        def __init__(self, label: str) -> None:
+        def __init__(self, label: str, managed: str = "true") -> None:
             super().__init__()
             self.label = label
+            self.managed = managed
 
         async def run(self, args, **kwargs):
             self.calls.append(list(args))
             if args[:2] == ["inspect", "--type"]:
                 return _ok("running")
             if args and args[0] == "inspect" and "--format" in args:
-                return _ok(self.label)
+                return _ok(f"{self.managed}|{self.label}")
             return await super().run(args, **kwargs)
 
     cfg = ContainerFeatureConfig(enabled=True, storage_mode="volume_soft")
     service = ContainerService(cfg, _paths(tmp_path), docker=ExistingDocker("wrong"))
-    with pytest.raises(ContainerError) as error:
-        await service.ensure_running()
-    assert error.value.code == "container_config_mismatch"
+    await service.ensure_running()
+    assert service._config_warning
+    assert service._config_warning["code"] == "container_config_drift"
     assert not any(call and call[0] == "create" for call in service.docker.calls)
 
     docker = ExistingDocker(service._config_signature())
     service = ContainerService(cfg, _paths(tmp_path), docker=docker)
     await service.ensure_running()
+    assert service._config_warning is None
     assert not any(call and call[0] == "create" for call in docker.calls)
+
+    unmanaged = ContainerService(
+        cfg, _paths(tmp_path), docker=ExistingDocker("wrong", managed="false")
+    )
+    with pytest.raises(ContainerError) as error:
+        await unmanaged.ensure_running()
+    assert error.value.code == "container_config_unverified"
 
 
 @pytest.mark.asyncio

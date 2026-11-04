@@ -9,8 +9,9 @@ from .schemas import ToolSearchArgs
 @tool(
     name="tool_search",
     description=(
-        "查询工具的说明、真实参数摘要/完整 JSON schema、示例和风险约束。"
-        "当工具 schema 只有简短 stub，或你不确定参数/风险时先调用。"
+        "查询工具的说明、真实参数摘要/完整 JSON schema、示例和风险约束。stub 工具或"
+        "不确定参数/风险时先调用；路由模式结果会标注所属工具集和是否已加载，未加载时"
+        "先 load_toolset。"
     ),
     args_model=ToolSearchArgs,
     category="control",
@@ -43,4 +44,20 @@ async def tool_search(args: ToolSearchArgs, ctx: ToolContext) -> dict:
         approved.add(spec.name)
     result = spec.tool_search_result(detail=args.detail)
     result["intent"] = args.intent
+    session = ctx.extras.get("toolset_session")
+    if session is not None and hasattr(registry, "routed_tool_names"):
+        loaded = set(registry.routed_tool_names(session))
+        result["loaded"] = spec.name in loaded
+        result["toolsets"] = list(spec.toolsets)
+        if spec.name not in loaded:
+            result["next"] = (
+                "该工具尚未加载。先调用 load_toolset 加载其工具集（"
+                + "、".join(spec.toolsets or ["未知"])
+                + "），下一次模型请求才会出现该工具。"
+            )
+        else:
+            result["next"] = (
+                "该工具已加载，可直接按参数摘要调用；需要完整 JSON schema 时用 "
+                "detail=full 重新查询。"
+            )
     return result

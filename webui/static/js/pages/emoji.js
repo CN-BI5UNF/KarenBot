@@ -129,12 +129,12 @@ export async function render(container, ctx) {
       h('div', { class: 'emoji-actions' },
         h('button', {
           class: 'btn btn-sm',
-          title: '改名',
+          title: '重命名这个表情包',
           onclick: () => startRename(item),
         }, icon('edit', { size: 14 }), '改名'),
         h('button', {
           class: 'btn btn-sm btn-danger',
-          title: '删除',
+          title: '删除这个表情包（不可恢复）',
           onclick: () => removeItem(item),
         }, icon('delete', { size: 14 })),
       ),
@@ -248,7 +248,7 @@ export async function render(container, ctx) {
           }),
           h('button', {
             class: 'btn btn-sm',
-            title: '移出列表',
+            title: '从待上传列表移出',
             onclick: () => {
               staged.splice(index, 1);
               renderStaged();

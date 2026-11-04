@@ -41,6 +41,16 @@ CORE_RULES = """<core_rules priority="critical">
 #    RAG 只是历史召回；重要记忆工具始终可用。
 # ============================================================
 
+_ROUTED_TOOLSET_POLICY = """<toolset_routing_policy>
+当前使用工具集双层路由：初始只暴露核心工具、工具集目录和 load_toolset。
+- 核心工具已可直接调用；只有确实缺少文件、群管理、联网等能力时，才先用 list_toolsets 查看目录。
+- 按当前任务加载 1-2 个真正需要的工具集，不要一次加载全部；调用 load_toolset(name) 后，下一次模型请求才会出现该工具集的紧凑 schema。
+- 未加载工具直接调用会返回 need_toolset，这不是任务失败；按返回的 next 加载后重试一次即可。
+- 已加载工具集在本会话内保持；不要反复加载同一集合。
+- 第二层路由是 tool_search：加载后的工具需要高级参数、完整 schema 或风险说明时，再查询 tool_search detail=full。未加载的工具先 load_toolset，再调用。
+</toolset_routing_policy>"""
+
+
 _TOOL_USE_PROTOCOL_HEADER = """<tool_use_protocol priority="high">
 
 <messaging>
@@ -102,12 +112,14 @@ tool result 是 role=tool.content 的 JSON 字符串，不是可直接发送的�
 </tool_result_contract>
 
 <tool_search_policy>
-低频、高风险或大参数工具只暴露名称和短说明。需要时先 tool_search 查询参数摘要、风险和示例；复杂嵌套用 detail=full。
+低频、高风险或大参数工具可能只暴露短说明。需要时先 tool_search 查询参数摘要、风险和示例；复杂嵌套用 detail=full。
 - stub 工具必须先 tool_search，不要猜参数；status=need_tool_search 表示尚未执行，不是失败。
+- 路由模式下，未加载的工具先 load_toolset；已加载工具可直接按紧凑 schema 调用。tool_search 结果会标注所属工具集和加载状态。
 - tool_search 只是内部查询，不会联系 QQ；查询后不一定要调用原工具。
 - status=denied 表示本轮系统事件禁止该工具，不要反复尝试。
 - 不要把 _tool_search_required 当成业务参数。
 </tool_search_policy>
+
 
 <context_tools>
 ## get_recent_chat_messages
@@ -283,6 +295,7 @@ def build_tool_use_protocol(
     *,
     eat_tool: bool = False,
     sleep_tool: bool = False,
+    tool_routing: bool = False,
 ) -> str:
     """按长期记忆模式拼装工具使用协议。
 
@@ -291,6 +304,7 @@ def build_tool_use_protocol(
                      "rag"  = RAG 模式（历史向量检索 + AI 主动维护重要记忆）
         eat_tool: 本轮工具列表是否提供 eat
         sleep_tool: 本轮工具列表是否提供 sleep
+        tool_routing: 是否为 routed 工具集模式；只影响协议说明，不改变工具执行
 
     Returns:
         完整的 <tool_use_protocol>...</tool_use_protocol> 字符串
@@ -305,6 +319,8 @@ def build_tool_use_protocol(
     middle_parts = [memory_block]
     if physiology_block:
         middle_parts.append(physiology_block)
+    if tool_routing:
+        middle_parts.append(_ROUTED_TOOLSET_POLICY.strip())
     return (
         _TOOL_USE_PROTOCOL_HEADER
         + "\n"

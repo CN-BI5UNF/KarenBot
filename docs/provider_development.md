@@ -56,6 +56,10 @@ registration_url: https://platform.myplatform.com
 
 映射实现在 `providers/protocols/openai_compat.py::_build_reasoning_extra_body`。
 
+`reasoning_effort_style` 是独立开关：`none` 不发送；`openai`/`deepseek` 把 Agent 的
+`reasoning.budget` 作为顶层 `reasoning_effort` 发送。**只有端点明确支持该字段时才打开**；
+本机 Gemini 反代可以使用 `openai`。WebUI 的「思考强度传递」下拉对应这个字段。
+
 留空时的默认值：有 preset 取 preset 的值；**没有 preset 的自定义 provider 取 `none`**。
 这条默认值很重要——早先的实现会让自定义 provider 落到 `thinking_extra_body`，
 把 `{"thinking": {"type": "disabled"}}` 发给根本不认识这个字段的网关，严格网关直接 400。

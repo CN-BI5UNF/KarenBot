@@ -250,6 +250,24 @@ class SocialAgent:
         retry: bool,
     ) -> str | None:
         check_msgs = list(messages)
+        # Gemini 的 OpenAI 兼容端点要求 contents 非空。主动路由在没有新消息时
+        # 会传空列表；如果只补 system，会得到 400 "contents is not specified"。
+        # 加一条中性的 user 指令，既满足协议，又不把空上下文当成用户发言。
+        if not any(
+            msg.get("role") in {"user", "assistant", "tool"}
+            and msg.get("content")
+            for msg in check_msgs
+            if isinstance(msg, dict)
+        ):
+            check_msgs.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "请根据当前人格状态、待办和已有上下文做本轮社交决策；"
+                        "没有明确必要理由时选择 skip。"
+                    ),
+                }
+            )
         check_msgs.append({"role": "system", "content": SOCIAL_DECISION_INSTRUCTION})
         if retry:
             check_msgs.append(

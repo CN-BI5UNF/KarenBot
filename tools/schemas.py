@@ -966,6 +966,55 @@ class ChatSelectionArgs(_ToolArgs):
     )
 
 
+class ListToolsetsArgs(_ToolArgs):
+    """list_toolsets 工具参数（无参数）。"""
+
+
+class LoadToolsetArgs(_ToolArgs):
+    """load_toolset 工具参数。"""
+
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description=(
+            "要加载的工具集 id，例如 workspace、messaging、qq_info、qq_admin、"
+            "history、memory、knowledge、web、emoji、persona、container、control。"
+        ),
+    )
+
+
+class GroupTriggerWindowArgs(_ToolArgs):
+    """group_trigger_window 工具参数。"""
+
+    action: Literal["open", "extend", "close", "status"] = Field(
+        ...,
+        description=(
+            "open=临时放行群消息；extend=延长即将结束的窗口；"
+            "close=提前关闭；status=查看当前窗口。"
+        ),
+    )
+    group_ids: list[int] = Field(
+        default_factory=list,
+        max_length=2,
+        description=(
+            "要操作的群号，最多 2 个。open/extend/close 留空时使用当前会话所在群；"
+            "status 留空时返回全部活动窗口。"
+        ),
+    )
+    duration_minutes: int = Field(
+        default=30,
+        ge=1,
+        le=1440,
+        description="open/extend 的持续分钟数（1-1440）；由你根据对话节奏决定。",
+    )
+    reason: str = Field(
+        default="",
+        max_length=300,
+        description="为什么临时放行或延长窗口。",
+    )
+
+
 class ScheduleWakeupArgs(_ToolArgs):
     """schedule_wakeup 工具参数。"""
 

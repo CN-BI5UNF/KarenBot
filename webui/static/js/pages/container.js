@@ -54,7 +54,7 @@ export async function render(container, ctx) {
       h('p', { class: 'page-desc' },
         'Docker 容器只提供资源/文件隔离，不是对抗恶意代码的绝对安全边界。'
         + '默认无网络、无特权、非 root、只挂载专用 workspace。'
-        + '首次使用直接点「一键准备 / 启动」；可在下方文件管理中浏览 /workspace。')),
+        + '首次使用直接点「一键准备 / 启动」；可在下方文件管理中只读浏览容器文件系统。这里的 /workspace 是容器存储，不是本机 AI 工作区；本机工作区请切到同一文件管理的「本机工作区」模式。')),
     actionHost, summaryHost, problemHost, fileBrowser.el, detailHost, storageHost);
   fill(container, page);
 
@@ -90,6 +90,8 @@ export async function render(container, ctx) {
     const box = info.container || {};
     const admin = storageSetup?.admin || {};
     const mismatch = storageMismatch();
+    const needsMount = storage.code === 'container_storage_not_mounted';
+    setupButton.textContent = needsMount ? '重新挂载 C 存储' : '初始化 C 存储';
     setupButton.style.display = (
       storage.mode === 'image_fixed'
       && !storage.ready
@@ -189,7 +191,9 @@ export async function render(container, ctx) {
         buttons.push(h('button', {
           class: 'btn btn-primary',
           onclick: () => promptStorageSetup(ctx, { force: true, onDone: refresh }),
-        }, '初始化 C 存储'));
+        }, storage.code === 'container_storage_not_mounted'
+          ? '重新挂载 C 存储'
+          : '初始化 C 存储'));
       }
     } else if (lastError) {
       const detail = lastError?.detail?.details || {};
@@ -201,13 +205,27 @@ export async function render(container, ctx) {
           onclick: () => ctx.navigate('settings', { section: 'container' }),
         }, '配置镜像加速'));
       }
+    } else if (info.config_warning) {
+      message = info.config_warning.message
+        || '容器创建后的设置发生变化；当前继续使用现有容器。';
+      buttons.push(h('button', {
+        class: 'btn',
+        onclick: () => ctx.navigate('settings', { section: 'container' }),
+      }, '查看容器设置'));
     }
     if (!message) return null;
+    const warningOnly = !lastError && !!info.config_warning;
     const body = [
       h('p', { style: { whiteSpace: 'pre-wrap' } }, message),
       buttons.length ? h('div', { class: 'row row-wrap' }, ...buttons) : null,
     ];
-    return card('需要处理', '先修复下面这一项，再点「一键准备 / 启动」。', ...body);
+    return card(
+      warningOnly ? '配置提示' : '需要处理',
+      warningOnly
+        ? '当前容器可以继续使用；下面的设置只影响显式重建。'
+        : '先修复下面这一项，再点「一键准备 / 启动」。',
+      ...body,
+    );
   }
 
   async function restartRuntime() {

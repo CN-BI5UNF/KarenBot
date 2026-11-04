@@ -46,6 +46,8 @@ from pydantic import BaseModel
 from utils.model_records import is_safe_no_action_result
 from utils.tool_result_state import tool_result_blocks_completion
 
+from .toolsets import toolsets_for_tool
+
 if TYPE_CHECKING:
     from adapters.base import IAdapter
     from memory import ArchiveStore, HistoryManager, ImportantMemoryManager
@@ -191,6 +193,9 @@ class ToolContext:
     chat_selection_cb: Callable[..., Any] | None = None
     """chat_selection 工具触发时更新群聊接收范围。"""
 
+    group_trigger_cb: Callable[..., Any] | None = None
+    """group_trigger_window 工具触发时更新按群 @ 触发窗口。"""
+
     workspace_dir: Path | None = None
     """AI 工作目录（data/workspace/）。所有文件类工具操作都被限制在这个目录下。
     None 表示禁用文件类工具（read/write/edit/list/delete/upload_file/run_python）。"""
@@ -301,6 +306,9 @@ class ToolSpec:
     examples: list[dict[str, Any]] = field(default_factory=list)
     """tool_search 返回的调用示例。"""
 
+    toolsets: list[str] = field(default_factory=list)
+    """该工具所属的工具集 id（可重叠）；由 build_default_registry 填充。"""
+
     def to_openai_schema(self) -> dict[str, Any]:
         """从 Pydantic 模型派生 OpenAI tool 格式 schema。
 
@@ -359,7 +367,7 @@ class ToolSpec:
                         "_tool_search_required": {
                             "type": "boolean",
                             "description": (
-                                "这是占位参数。真实调用前必须先用 tool_search 查询参数摘要。"
+                                "占位参数；先 tool_search 查询参数。"
                             ),
                         }
                     },
@@ -387,6 +395,7 @@ class ToolSpec:
             "risk_level": self.risk_level,
             "search_tags": list(self.search_tags),
             "examples": list(self.examples),
+            "toolsets": list(self.toolsets),
             "constraints": _tool_constraints(self),
         }
         if detail == "full":
@@ -466,6 +475,7 @@ def tool(
             search_tags=list(search_tags or []),
             risk_level=risk_level,
             examples=list(examples or []),
+            toolsets=list(toolsets_for_tool(name)),
         )
         _DEFAULT_REGISTRY.append(spec)
         # 保留原函数（便于直接测试调用），并把 spec 挂到属性上
@@ -503,15 +513,22 @@ class ToolRegistry:
         - get_no_feedback_names(): 返回所有 no_feedback=True 的工具名集合（兼容旧调用）
     """
 
-    def __init__(self, specs: list[ToolSpec]) -> None:
+    def __init__(
+        self,
+        specs: list[ToolSpec],
+        *,
+        schema_profile: str = "compact",
+    ) -> None:
         # 用 dict 索引便于按名查找；同时按注册顺序保持稳定（dict 在 3.7+ 保序）
         self._specs: dict[str, ToolSpec] = {}
         for spec in specs:
             if spec.name in self._specs:
                 raise ValueError(f"工具名冲突：{spec.name} 被注册了两次")
             self._specs[spec.name] = spec
+        self.schema_profile = str(schema_profile or "compact")
         # schema 在 registry 生命周期内不变；缓存后，token 估算也能按对象 id 复用。
         self._schemas_cache: list[dict[str, Any]] | None = None
+        self._routed_schemas_cache: dict[frozenset[str], list[dict[str, Any]]] = {}
 
     def __contains__(self, name: str) -> bool:
         return name in self._specs
@@ -537,6 +554,33 @@ class ToolRegistry:
                 spec.to_openai_schema() for spec in self._specs.values()
             ]
         return self._schemas_cache
+
+    def routed_tool_names(self, session: Any | None = None) -> list[str]:
+        """Return the tool names available in routed mode for one session."""
+        from .toolsets import allowed_tool_names
+
+        loaded = set(getattr(session, "loaded", set()) or set())
+        allowed = allowed_tool_names(loaded)
+        return [name for name in self._specs if name in allowed]
+
+    def get_routed_schemas(self, session: Any | None = None) -> list[dict[str, Any]]:
+        """Return the initial/core plus loaded toolset schemas for routed mode.
+
+        The list is cached by the loaded-set identity, so repeated runner loops
+        do not rebuild JSON schemas until ``load_toolset`` changes the session.
+        """
+        loaded = frozenset(getattr(session, "loaded", set()) or set())
+        cached = self._routed_schemas_cache.get(loaded)
+        if cached is not None:
+            return cached
+        names = set(self.routed_tool_names(session))
+        schemas = [
+            spec.to_openai_schema()
+            for name, spec in self._specs.items()
+            if name in names
+        ]
+        self._routed_schemas_cache[loaded] = schemas
+        return schemas
 
     def get_no_feedback_names(self) -> set[str]:
         """返回所有 no_feedback=True 的工具名。
@@ -566,6 +610,24 @@ class ToolRegistry:
                 return _ensure_tool_result_envelope(
                     tool_name,
                     {"ok": False, "error": f"unknown tool: {tool_name}"},
+                )
+            session = ctx.extras.get("toolset_session")
+            if session is not None and tool_name not in self.routed_tool_names(session):
+                return _ensure_tool_result_envelope(
+                    tool_name,
+                    {
+                        "ok": False,
+                        "status": "need_toolset",
+                        "tool_name": tool_name,
+                        "brief": f"工具 {tool_name} 所在工具集尚未加载。",
+                        "loaded_toolsets": list(
+                            getattr(session, "loaded_ids", lambda: [])()
+                        ),
+                        "next": (
+                            "先调用 list_toolsets 查看目录，再用 load_toolset "
+                            "加载所需工具集；加载后下一次请求会出现该工具。"
+                        ),
+                    },
                 )
             finish_after_success = (
                 tool_name != "no_action"

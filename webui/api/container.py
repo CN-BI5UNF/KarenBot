@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import posixpath
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request, Response
 
 from features.container import ContainerError
 from features.container.admin import admin_capabilities
+from webui.file_types import image_media_type
 
 from .deps import require_runtime
 
@@ -22,6 +24,37 @@ def _service(request: Request) -> Any:
     if service is None:
         raise HTTPException(status_code=503, detail="容器服务尚未就绪")
     return service
+
+
+def _workspace_file_path(path: str) -> str:
+    """The WebUI file manager is restricted to the container workspace."""
+    text = str(path or "").strip()
+    if not text or any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "container_path_invalid",
+                "message": "容器文件路径无效",
+            },
+        )
+    if ".." in text.split("/"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "container_path_forbidden",
+                "message": "容器文件路径不允许 ..",
+            },
+        )
+    normalized = posixpath.normpath(text)
+    if normalized != "/workspace" and not normalized.startswith("/workspace/"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "container_path_forbidden",
+                "message": "文件管理器仅允许访问容器 /workspace",
+            },
+        )
+    return normalized
 
 
 def _http_error(exc: ContainerError) -> HTTPException:
@@ -91,7 +124,7 @@ async def container_files(
 ) -> dict[str, Any]:
     service = _service(request)
     try:
-        return await service.browse_files(path)
+        return await service.browse_files(_workspace_file_path(path))
     except ContainerError as exc:
         raise _http_error(exc) from exc
 
@@ -103,7 +136,33 @@ async def container_file_content(
 ) -> dict[str, Any]:
     service = _service(request)
     try:
-        return await service.preview_file(path)
+        return await service.preview_file(_workspace_file_path(path))
+    except ContainerError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/files/raw")
+async def container_file_raw(request: Request, path: str = "") -> Response:
+    service = _service(request)
+    try:
+        payload = await service.read_image(_workspace_file_path(path))
+        media_type = image_media_type(payload["data"])
+        if media_type is None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "container_not_image",
+                    "message": "该文件不是支持的图片格式",
+                },
+            )
+        return Response(
+            content=payload["data"],
+            media_type=media_type,
+            headers={
+                "Cache-Control": "private, max-age=60",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
     except ContainerError as exc:
         raise _http_error(exc) from exc
 

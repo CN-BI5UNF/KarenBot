@@ -31,6 +31,7 @@ class PipelineToolContextMixin:
         trigger_message_ids: list[str] | None = None,
         task_phase: str = "normal",
         tool_policy: dict[str, Any] | None = None,
+        toolset_session: Any | None = None,
     ) -> ToolContext:
         """每次 Agent 调用前构造新的 ToolContext。
 
@@ -47,6 +48,13 @@ class PipelineToolContextMixin:
             self_id = self._self_id_by_conversation.get(conversation_id)
             if self_id:
                 extras["self_id"] = self_id
+            if conversation_id.startswith("group:"):
+                try:
+                    extras["current_group_id"] = int(
+                        conversation_id.split(":", 1)[1]
+                    )
+                except (TypeError, ValueError):
+                    pass
         if default_target is not None:
             raw_target_id = str(default_target.target_id)
             extras["default_reply_target"] = {
@@ -66,6 +74,8 @@ class PipelineToolContextMixin:
         extras["trigger_message_ids"] = list(trigger_message_ids or [])
         if tool_policy:
             extras["tool_policy"] = tool_policy
+        if toolset_session is not None:
+            extras["toolset_session"] = toolset_session
 
         async def _send_actions(
             actions: list[dict[str, Any]],
@@ -100,6 +110,7 @@ class PipelineToolContextMixin:
             archive=self.archive,
             wakeup_cb=self.wakeup_scheduler.schedule,
             chat_selection_cb=self.apply_group_chat_selection,
+            group_trigger_cb=self.apply_group_trigger_window,
             vision=self.vision,
             main_vision=getattr(self, "main_vision", None),
             web_search=self.web_search,

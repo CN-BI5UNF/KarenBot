@@ -356,6 +356,34 @@ code, pre, .mono {
 }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+/* 悬停提示：由 tooltip.js 把 title 升级为 data-tooltip，
+ * 原生提示在脚本未加载时仍然可用。 */
+.app-tooltip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 120;
+  max-width: min(300px, calc(100vw - 16px));
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+  font-size: var(--fs-small);
+  font-weight: 400;
+  line-height: 1.55;
+  letter-spacing: .01em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity var(--transition-fast) var(--ease),
+              transform var(--transition-fast) var(--ease);
+}
+.app-tooltip.visible { opacity: 1; transform: translateY(0); }
+
 .content { flex: 1; overflow-y: auto; padding: 32px; }
 /* 指南 §七：内容切换 180ms 淡入，仅 opacity，不做位移 */
 .page { max-width: var(--content-max); margin: 0 auto; animation: page-in var(--transition-page) ease-out; }
