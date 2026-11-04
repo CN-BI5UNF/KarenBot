@@ -4,6 +4,26 @@
 
 > 项目已由 Debata_Agent 更名为 KarenBot。以下历史条目保留当时的旧名称，以便追溯；上游项目仍为 [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent)。
 
+## [1.0.1-beta] — 2026-11-04
+
+### Fixed
+
+- 自定义 OpenAI-compatible provider 可选择 `reasoning_effort` 传递风格；本机 Gemini
+  反代设为 `openai` 后，聊天配置的 `high` 会实际发送，不再只保存在本地。
+- 社交决策在空上下文时补一条中性 user 消息，修复 Gemini 兼容端点
+  `400 contents is not specified`。
+- 修复 Windows CI 中控制字符测试文件名导致的 setup error；控制字符过滤逻辑改用
+  跨平台单测覆盖。
+- 人格进食/睡眠/工作动作改为到点独立结算，避免长时间停留在旧状态。
+
+### Added / Changed
+
+- 工具集双层路由（实验）、工具提示优化、群聊 @ 触发窗口、本机/容器工作区文件管理
+  合并、图片预览、目录缓存和容器文件快速路径。
+- 容器配置漂移不再自动重建；显式重建仍保留 `/workspace`。
+
+完整说明见 [`releases/v1.0.1-beta.md`](releases/v1.0.1-beta.md)。
+
 ## [1.0.0-beta] — 2026-11-01
 
 ### Added

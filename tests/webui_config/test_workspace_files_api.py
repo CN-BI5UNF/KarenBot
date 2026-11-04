@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,8 +34,16 @@ def workspace(tmp_path: Path):
     outside.write_text("secret", encoding="utf-8")
     (root / "outside-link").symlink_to(outside)
     (root / "inside-link").symlink_to(root / "hello.txt")
-    (root / "bad\x01name").write_text("hidden", encoding="utf-8")
+    # POSIX 允许控制字符文件名，Windows 会直接 OSError；控制字符过滤逻辑
+    # 由下面的 _valid_component 单测在所有平台覆盖。
+    if os.name != "nt":
+        (root / "bad\x01name").write_text("hidden", encoding="utf-8")
     return root
+
+
+def test_workspace_path_validator_rejects_control_characters():
+    assert workspace_api._valid_component("bad\x01name") is False
+    assert workspace_api._valid_component("normal-name.txt") is True
 
 
 @pytest.mark.asyncio

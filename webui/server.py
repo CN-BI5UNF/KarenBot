@@ -83,7 +83,7 @@ def create_app(host: RuntimeHost, auth: TokenAuth) -> FastAPI:
     app = FastAPI(
         title="KarenBot WebUI",
         description="KarenBot 的浏览器控制台（原 PySide6 桌面端的替代）",
-        version="1.0.0-beta",
+        version="1.0.1-beta",
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url=None,

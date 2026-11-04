@@ -24,7 +24,7 @@ KarenBot 是一个通用聊天智能体框架。你给它一个人格，它就�
 - 仓库：<https://github.com/CN-BI5UNF/KarenBot>
 - 默认分支：`main`
 - 应用内更新跟踪分支：`refactor/main`（与 `main` 同步，供更新器读取 Releases/tag）
-- 当前状态：`1.0.0-beta` 重构快照，接口仍可能调整
+- 当前状态：`1.0.1-beta` 重构快照，接口仍可能调整
 
 > **上游与许可**：本项目源自 [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent) 及其贡献者，保留原始版权声明，并继续以 **Apache-2.0** 协议发布。KarenBot 是在其基础上的重构与改名版本，详见 [NOTICE](NOTICE)。
 
