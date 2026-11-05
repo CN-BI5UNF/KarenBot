@@ -702,6 +702,23 @@ def test_build_service_cache_and_http_error_mapping(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_read_only_status_does_not_wait_for_update_network_lock(tmp_path):
+    work, data, remote = _seed_release_repo(tmp_path)
+    service = UpdateService(
+        work,
+        data,
+        mirror=f"file://{remote}",
+        allow_local_remote=True,
+    )
+
+    async with service._lock:
+        status = await asyncio.wait_for(service.status(), timeout=5)
+
+    assert status["current_commit"]
+    assert status["current_branch"]
+
+
+@pytest.mark.asyncio
 async def test_version_and_available_snapshots_are_offline(tmp_path):
     work, data, remote = _seed_release_repo(tmp_path)
     service = UpdateService(
@@ -711,7 +728,7 @@ async def test_version_and_available_snapshots_are_offline(tmp_path):
         allow_local_remote=True,
     )
     version = await service.version_info()
-    assert version["version_label"] == "1.0.1-beta"
+    assert version["version_label"] == "1.0.1-alpha"
     assert version["commit"]
     assert version["commit_short"] == version["commit"][:10]
 

@@ -68,6 +68,17 @@ class PipelineToolContextMixin:
         extras["persona_name"] = str(
             getattr(getattr(self, "persona", None), "name", "") or ""
         )
+        container_cfg = getattr(self.features_cfg, "container", None)
+        agent_cfg = getattr(container_cfg, "agent", None)
+        extras["agent_container_mode"] = str(
+            getattr(agent_cfg, "active_mode", "off") or "off"
+        )
+        extras["agent_host_execution"] = str(
+            getattr(agent_cfg, "host_execution", "sandbox") or "sandbox"
+        )
+        extras["agent_sandbox_network"] = bool(
+            getattr(agent_cfg, "sandbox_network", True)
+        )
         extras["task_phase"] = task_phase
         extras["seen_inbound_seq"] = int(seen_inbound_seq or trigger_inbound_seq or 0)
         extras["focus_user_ids"] = list(focus_user_ids or [])
@@ -76,6 +87,11 @@ class PipelineToolContextMixin:
             extras["tool_policy"] = tool_policy
         if toolset_session is not None:
             extras["toolset_session"] = toolset_session
+            if getattr(toolset_session, "agent_state", None) is None:
+                from features.coding_agent.state import AgentSessionState
+
+                toolset_session.agent_state = AgentSessionState()
+            extras["agent_session"] = toolset_session.agent_state
 
         async def _send_actions(
             actions: list[dict[str, Any]],

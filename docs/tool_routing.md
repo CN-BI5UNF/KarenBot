@@ -52,6 +52,7 @@ routed 初始始终暴露回复、收尾和常用上下文工具：发送/提交
 | `emoji` | 表情包管理 |
 | `workspace` | workspace 文件、Python、上传、后台资料整理 |
 | `persona` | 进食、睡眠、工作状态 |
+| `coding` | 本机/容器编码工具、补丁、待办、计划、子 Agent、自定义工具 |
 | `container` | 受控 Docker 容器 |
 
 允许重叠：例如 `upload_file` 同时属于 `messaging` 和 `workspace`，加载任一集合
@@ -78,3 +79,18 @@ routed 初始始终暴露回复、收尾和常用上下文工具：发送/提交
   可能降低 KV cache 命中。建议按实际任务测量 prompt/cached tokens 后再决定是否
   长期使用。
 - 子 Agent（`start_agent_task`）仍使用自己固定的工具集，不参与会话 routed 状态。
+
+## agent 档位
+
+`behavior.tool_schema_profile="agent"` 是给编码任务准备的 Claude Code 式延迟加载：
+
+- 初始只暴露 `send_private_messages`、`send_group_message`、`commit_send_attempt`、
+  `no_action`、`tool_search` 和
+  `agent_read/agent_write/agent_edit/agent_bash/agent_glob/agent_grep/agent_ls`。
+- 其余工具（包括 `agent_ls`、`agent_todo`、`agent_apply_patch`、`agent_spawn`、
+  `agent_notebook_edit`、自定义工具和全部非编码工具）用
+  `tool_search select=["工具名"]` 加载；下一次模型请求才会出现其 schema。
+- 未加载调用返回 `status=need_tool_search`。加载集合按会话隔离，只存在内存中。
+- 该档位不使用 `list_toolsets` / `load_toolset`；工具级 ToolSearch 取代工具集层。
+- 编码工具本身仍按 `agent_container_mode` 判断 Pi/DSH/Claude Code 能力；本机固定
+  Claude Code 语义。详见 [`agent_modes.md`](agent_modes.md)。

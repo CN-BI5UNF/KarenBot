@@ -8,6 +8,7 @@ from tests.integration_pipeline.helpers import (
     RecordingPersonaAgent,
     _ai_load_toolset,
     _ai_no_action,
+    _ai_tool_search,
     _drain_pipeline,
     _msg,
 )
@@ -67,6 +68,32 @@ async def test_routed_toolsets_are_isolated_by_conversation(build_pipeline):
     await _drain_pipeline(pipeline)
     assert len(provider.calls) == 3
     assert "read_file" not in _tool_names(provider.calls[2])
+
+
+@pytest.mark.asyncio
+async def test_agent_profile_loads_tool_schema_on_next_request(build_pipeline):
+    pipeline, provider, _, _, _ = await build_pipeline(
+        [_ai_tool_search("agent_todo"), _ai_no_action(), _ai_no_action()],
+        persona_agent=RecordingPersonaAgent(),
+        tool_schema_profile="agent",
+    )
+
+    await pipeline.enqueue(_msg(user_id="123", text="加载待办工具", message_id="agent-1"))
+    await _drain_pipeline(pipeline)
+
+    assert len(provider.calls) == 2
+    first_tools = _tool_names(provider.calls[0])
+    second_tools = _tool_names(provider.calls[1])
+    assert "tool_search" in first_tools
+    assert "agent_read" in first_tools
+    assert "agent_ls" in first_tools
+    assert "agent_todo" not in first_tools
+    assert "read_file" not in first_tools
+    assert "agent_todo" in second_tools
+
+    await pipeline.enqueue(_msg(user_id="123", text="继续", message_id="agent-2"))
+    await _drain_pipeline(pipeline)
+    assert "agent_todo" in _tool_names(provider.calls[2])
 
 
 @pytest.mark.asyncio

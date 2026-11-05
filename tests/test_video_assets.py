@@ -72,6 +72,38 @@ async def test_project_record_sends_full_video_data_url(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_missing_video_can_be_dropped_with_placeholder(tmp_path):
+    store = _store(tmp_path)
+    ref = await store.ingest(_mp4_bytes(), message_id="m1", index=0)
+    record = {
+        "role": "user",
+        "content": "看视频",
+        "metadata": {
+            "messages": [{"message_id": "m1"}],
+            "video_assets": [ref],
+        },
+    }
+    (tmp_path / "workspace" / ref["path"]).unlink()
+
+    with pytest.raises(VideoAssetError):
+        await store.project_record(record)
+
+    dropped: list[dict] = []
+    projected = await store.project_record(
+        record,
+        drop_unavailable=True,
+        dropped=dropped,
+    )
+    assert len(dropped) == 1
+    assert projected["metadata"]["video_assets"] == []
+    assert "视频不可用" in json.dumps(projected, ensure_ascii=False)
+    assert not any(
+        isinstance(block, dict) and block.get("type") == "video_url"
+        for block in projected["content"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_local_video_requires_trusted_local(tmp_path):
     store = _store(tmp_path)
     source = tmp_path / "clip.mp4"

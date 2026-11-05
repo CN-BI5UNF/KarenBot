@@ -538,10 +538,11 @@ SETTINGS_GROUPS: list[Section] = [
              "label": "工具 schema 档位", "type": "enum", "default": "compact",
              "options": [["compact", "compact（省 token，推荐）"],
                          ["full", "full（旧行为，排查用）"],
-                         ["routed", "routed（工具集双层路由，实验）"]],
+                         ["routed", "routed（工具集双层路由，实验）"],
+                         ["agent", "agent（Claude-Code 式延迟加载，推荐用于编码）"]],
              "needs_restart": True,
-             "help": "routed 初始只暴露核心工具和工具集目录；模型用 load_toolset "
-                     "加载所需工具集，再用 tool_search 查询高级参数。"},
+             "help": "routed 初始只暴露核心工具和工具集目录，用 load_toolset 加载工具集；"
+                     "agent 初始只暴露核心工具，其余用 tool_search select=[...] 按需加载完整 schema。"},
             {"path": "behavior.kv_prompt_diagnostics",
              "label": "KV 诊断级别", "type": "enum", "default": "summary",
              "options": [["off", "off"], ["summary", "summary（轻量）"],

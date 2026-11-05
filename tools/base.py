@@ -46,7 +46,7 @@ from pydantic import BaseModel
 from utils.model_records import is_safe_no_action_result
 from utils.tool_result_state import tool_result_blocks_completion
 
-from .toolsets import toolsets_for_tool
+from .toolsets import AGENT_CORE_TOOL_NAMES, toolsets_for_tool
 
 if TYPE_CHECKING:
     from adapters.base import IAdapter
@@ -529,6 +529,7 @@ class ToolRegistry:
         # schema 在 registry 生命周期内不变；缓存后，token 估算也能按对象 id 复用。
         self._schemas_cache: list[dict[str, Any]] | None = None
         self._routed_schemas_cache: dict[frozenset[str], list[dict[str, Any]]] = {}
+        self._agent_schemas_cache: dict[frozenset[str], list[dict[str, Any]]] = {}
 
     def __contains__(self, name: str) -> bool:
         return name in self._specs
@@ -582,6 +583,32 @@ class ToolRegistry:
         self._routed_schemas_cache[loaded] = schemas
         return schemas
 
+    def agent_tool_names(self, session: Any | None = None) -> list[str]:
+        """Return core + individually loaded tools for the ``agent`` profile."""
+        loaded = set(getattr(session, "loaded_tools", set()) or set())
+        return [
+            name
+            for name in self._specs
+            if name in AGENT_CORE_TOOL_NAMES or name in loaded
+        ]
+
+    def get_agent_schemas(self, session: Any | None = None) -> list[dict[str, Any]]:
+        """Return the core plus ToolSearch-loaded schemas for ``agent`` mode."""
+        loaded = frozenset(getattr(session, "loaded_tools", set()) or set())
+        cached = self._agent_schemas_cache.get(loaded)
+        if cached is not None:
+            return cached
+        names = set(self.agent_tool_names(session))
+        schemas = [
+            spec.to_openai_schema()
+            for name, spec in self._specs.items()
+            if name in names
+        ]
+        if len(self._agent_schemas_cache) >= 64:
+            self._agent_schemas_cache.pop(next(iter(self._agent_schemas_cache)))
+        self._agent_schemas_cache[loaded] = schemas
+        return schemas
+
     def get_no_feedback_names(self) -> set[str]:
         """返回所有 no_feedback=True 的工具名。
 
@@ -612,7 +639,29 @@ class ToolRegistry:
                     {"ok": False, "error": f"unknown tool: {tool_name}"},
                 )
             session = ctx.extras.get("toolset_session")
-            if session is not None and tool_name not in self.routed_tool_names(session):
+            if session is not None and self.schema_profile == "agent":
+                if tool_name not in self.agent_tool_names(session):
+                    return _ensure_tool_result_envelope(
+                        tool_name,
+                        {
+                            "ok": False,
+                            "status": "need_tool_search",
+                            "tool_name": tool_name,
+                            "brief": f"工具 {tool_name} 尚未加载 schema。",
+                            "loaded_tools": list(
+                                getattr(session, "loaded_tool_ids", lambda: [])()
+                            ),
+                            "next": (
+                                f"先调用 tool_search select=[\"{tool_name}\"] 加载该工具；"
+                                "下一次模型请求会出现它的 schema，然后才能调用。"
+                            ),
+                        },
+                    )
+            elif (
+                self.schema_profile == "routed"
+                and session is not None
+                and tool_name not in self.routed_tool_names(session)
+            ):
                 return _ensure_tool_result_envelope(
                     tool_name,
                     {

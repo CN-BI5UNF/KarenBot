@@ -272,6 +272,23 @@ from .persona_context_view import PersonaContextView
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_completion_json(
+    result: Any,
+) -> tuple[dict[str, Any] | None, int, int]:
+    """Parse the visible content, then fall back to reasoning text.
+
+    Some OpenAI-compatible reasoning endpoints put the final JSON in
+    ``reasoning_content`` or emit prose containing braces.  Returning lengths
+    lets callers log a useful diagnostic without persisting model output.
+    """
+    content = str(_read_field(result, "content") or "")
+    reasoning = str(getattr(result, "reasoning_content", "") or "")
+    parsed = _parse_json_object(content)
+    if parsed is None and reasoning:
+        parsed = _parse_json_object(reasoning)
+    return parsed, len(content), len(reasoning)
+
 _RESTING_ACTIONS = {"sleeping", "eating", "collapsing"}
 _WORKING_ACTION = "working"
 _ENGAGED_ACTIONS = _RESTING_ACTIONS | {_WORKING_ACTION}
@@ -961,9 +978,15 @@ class PersonaAgent:
                 self._emit_status("error", "人格状态更新异常")
                 continue
 
-            parsed = _parse_json_object(str(_read_field(result, "content") or ""))
+            parsed, content_len, reasoning_len = _parse_completion_json(result)
             if parsed is None:
-                logger.warning("人格状态更新返回无有效 JSON")
+                logger.warning(
+                    "人格状态更新返回无有效 JSON content_len=%d reasoning_len=%d "
+                    "finish_reason=%s",
+                    content_len,
+                    reasoning_len,
+                    str(_read_field(result, "finish_reason") or ""),
+                )
                 continue
             try:
                 return _TurnUpdate.model_validate(parsed)
@@ -1001,9 +1024,15 @@ class PersonaAgent:
                 self._emit_status("error", "人格定时维护异常")
                 continue
 
-            parsed = _parse_json_object(str(_read_field(result, "content") or ""))
+            parsed, content_len, reasoning_len = _parse_completion_json(result)
             if parsed is None:
-                logger.warning("人格定时维护返回无有效 JSON")
+                logger.warning(
+                    "人格定时维护返回无有效 JSON content_len=%d reasoning_len=%d "
+                    "finish_reason=%s",
+                    content_len,
+                    reasoning_len,
+                    str(_read_field(result, "finish_reason") or ""),
+                )
                 continue
             try:
                 return _TurnUpdate.model_validate(parsed)
@@ -1052,9 +1081,15 @@ class PersonaAgent:
                 self._emit_status("error", "人格恢复评估异常")
                 continue
 
-            parsed = _parse_json_object(str(_read_field(result, "content") or ""))
+            parsed, content_len, reasoning_len = _parse_completion_json(result)
             if parsed is None:
-                logger.warning("人格恢复评估返回无有效 JSON")
+                logger.warning(
+                    "人格恢复评估返回无有效 JSON content_len=%d reasoning_len=%d "
+                    "finish_reason=%s",
+                    content_len,
+                    reasoning_len,
+                    str(_read_field(result, "finish_reason") or ""),
+                )
                 continue
             try:
                 return _RecoveryEstimate.model_validate(parsed)

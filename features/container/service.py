@@ -31,6 +31,7 @@ from typing import Any
 from app_config.paths import AppPaths
 
 from .admin import run_admin_setup
+from .agent_helper import AGENT_HELPER_SOURCE
 from .docker_cli import CommandResult, DockerCLI
 from .errors import ContainerError
 from .storage import ContainerStorage
@@ -474,6 +475,13 @@ class ContainerService:
         if tagged.returncode != 0:
             raise _map_failure(tagged, default="container_image_tag_failed")
         logger.info("容器镜像已标记：%s -> %s", source, self.image)
+
+    async def container_state(self) -> str | None:
+        """Public read-only container state probe (does not start it)."""
+        try:
+            return await self._container_state()
+        except ContainerError:
+            return None
 
     async def _container_state(self) -> str | None:
         result = await self._run(
@@ -1030,9 +1038,194 @@ class ContainerService:
             "timed_out": result.timed_out,
         }
 
-    async def read_file(self, path: str) -> dict[str, Any]:
-        target = _validate_container_path(path)
+    async def _write_agent_helper(self) -> None:
+        """Materialize the helper script in the container's writable /tmp.
+
+        Passing a ~15 KiB script through ``python3 -c`` hits Docker's command
+        arg limit on some setups, so write it to a tmpfs file and execute it.
+        ``/tmp`` is noexec, but ``python3 <file>`` only needs read access.
+        """
+        result = await self._run(
+            [
+                "exec",
+                "-i",
+                self.name,
+                "/bin/sh",
+                "-c",
+                "cat > /tmp/karen-agent-helper.py",
+            ],
+            input_bytes=AGENT_HELPER_SOURCE.encode("utf-8"),
+            timeout=15.0,
+            max_output_bytes=16 * 1024,
+            raise_on_timeout=False,
+        )
+        if result.returncode != 0:
+            raise ContainerError(
+                "无法写入容器 Agent 辅助脚本",
+                code="container_agent_helper_write_failed",
+            )
+
+    async def agent_helper(
+        self,
+        action: str,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        """Run one structured coding-agent file operation inside the container."""
         await self.ensure_running()
+        await self._write_agent_helper()
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        result = await self._run(
+            [
+                "exec",
+                "-i",
+                "--workdir",
+                _CONTAINER_WORKDIR,
+                self.name,
+                "python3",
+                "-I",
+                "/tmp/karen-agent-helper.py",
+                str(action or ""),
+            ],
+            input_bytes=body,
+            timeout=max(1.0, min(float(timeout_seconds), 300.0)),
+            max_output_bytes=min(self.max_output_bytes, 4 * 1024 * 1024),
+            raise_on_timeout=False,
+        )
+        self._touch()
+        if result.timed_out:
+            return {
+                "ok": False,
+                "status": "failed",
+                "brief": "容器 Agent 文件操作超时",
+                "error": "container_agent_timeout",
+                "code": "container_agent_timeout",
+            }
+        try:
+            parsed = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError:
+            parsed = {}
+        if result.returncode != 0 or not isinstance(parsed, dict):
+            return {
+                "ok": False,
+                "status": "failed",
+                "brief": "容器 Agent 文件操作失败",
+                "error": (result.stderr or result.stdout or "container_agent_failed")[:2000],
+                "code": "container_agent_failed",
+            }
+        if "ok" not in parsed:
+            parsed["ok"] = False
+        return parsed
+
+    async def exec_agent(
+        self,
+        command: str,
+        *,
+        cwd: str = _CONTAINER_WORKDIR,
+        timeout_seconds: float = 120.0,
+        stdin: str = "",
+    ) -> dict[str, Any]:
+        """Execute a shell command for the coding tools with cwd/stdin support."""
+        await self.ensure_running()
+        text = str(command or "")
+        if not text.strip():
+            raise ContainerError("命令不能为空", code="container_invalid_argument")
+        if len(text.encode("utf-8")) > _MAX_COMMAND_BYTES:
+            raise ContainerError("命令过长", code="container_invalid_argument")
+        raw_cwd = str(cwd or _CONTAINER_WORKDIR).strip()
+        if not raw_cwd.startswith("/"):
+            raw_cwd = posixpath.join(_CONTAINER_WORKDIR, raw_cwd)
+        target_cwd = _validate_container_path(raw_cwd, allow_root=True)
+        input_bytes = str(stdin or "").encode("utf-8")
+        if len(input_bytes) > 1024 * 1024:
+            raise ContainerError("stdin 超过 1 MiB", code="container_invalid_argument")
+        timeout = max(1.0, min(float(timeout_seconds), 1800.0))
+        result = await self._run(
+            [
+                "exec",
+                "-i",
+                "--workdir",
+                target_cwd,
+                self.name,
+                "/bin/sh",
+                "-lc",
+                text,
+            ],
+            input_bytes=input_bytes,
+            timeout=timeout,
+            max_output_bytes=self.max_output_bytes,
+            raise_on_timeout=False,
+        )
+        self._touch()
+        return {
+            "ok": result.returncode == 0 and not result.timed_out,
+            "status": "done" if result.returncode == 0 and not result.timed_out else "failed",
+            "brief": (
+                f"命令结束，exit_code={result.returncode}"
+                if not result.timed_out
+                else f"命令超时（{int(timeout)} 秒）"
+            ),
+            "command": text,
+            "cwd": target_cwd,
+            "exit_code": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "timed_out": result.timed_out,
+            "truncated": result.truncated,
+            "sandbox": "container",
+        }
+
+    async def copy_host_file(
+        self,
+        host_path: Path | str,
+        container_path: str,
+        *,
+        executable: bool = False,
+    ) -> dict[str, Any]:
+        """Copy a trusted host file into the container workspace.
+
+        Install recipes use this for small helper binaries.  The caller must
+        supply a code-owned path; this is not exposed as an LLM tool action.
+        """
+        source = Path(host_path)
+        if not source.is_file():
+            raise ContainerError("宿主文件不存在", code="container_file_missing")
+        target = _validate_container_path(container_path)
+        await self.ensure_running()
+        result = await self._run(
+            [
+                "cp",
+                str(source),
+                f"{self.name}:{target}",
+            ],
+            timeout=60.0,
+            max_output_bytes=16 * 1024,
+            raise_on_timeout=False,
+        )
+        if result.returncode != 0:
+            raise _map_failure(result, default="container_file_copy_failed")
+        if executable:
+            chmod = await self._run(
+                ["exec", self.name, "chmod", "755", "--", target],
+                timeout=10.0,
+                max_output_bytes=16 * 1024,
+                raise_on_timeout=False,
+            )
+            if chmod.returncode != 0:
+                raise _map_failure(chmod, default="container_file_chmod_failed")
+        self._touch()
+        return {"ok": True, "path": target, "bytes": source.stat().st_size}
+
+    async def read_file(
+        self,
+        path: str,
+        *,
+        ensure_running: bool = True,
+    ) -> dict[str, Any]:
+        target = _validate_container_path(path)
+        if ensure_running:
+            await self.ensure_running()
         result = await self._run(
             ["exec", self.name, "cat", "--", target],
             timeout=30.0,

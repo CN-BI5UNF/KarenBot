@@ -57,7 +57,7 @@ RELEASES_CACHE_SECONDS = 300
 MAX_RELEASES = 40
 RELEASE_NOTES_DIR = "releases"
 RELEASE_NOTES_MAX_CHARS = 20_000
-APP_RELEASE_LABEL = "1.0.1-beta"
+APP_RELEASE_LABEL = "1.0.1-alpha"
 DEPENDENCY_FILES = ("pyproject.toml", "uv.lock", "requirements.txt", "requirements-dev.txt")
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$")
 
@@ -381,13 +381,21 @@ class UpdateService:
     # ============================================================
 
     async def status(self) -> dict:
-        async with self._lock:
-            return await self._status_unlocked()
+        # Read-only local metadata: do not wait behind a long network check or
+        # release fetch. Mutating operations keep using ``self._lock``.
+        return await self._status_unlocked()
 
     async def _status_unlocked(self) -> dict:
-        current_sha = await self._git("rev-parse", "HEAD")
-        branch = await self._git("branch", "--show-current")
-        status_text = await self._git("status", "--porcelain=v1", "--untracked-files=normal")
+        # Independent read-only git queries; running them serially adds avoidable
+        # latency on small ARM boxes (status is usually the slow one).
+        current_sha, branch, status_text, local_main = await asyncio.gather(
+            self._git("rev-parse", "HEAD"),
+            self._git("branch", "--show-current"),
+            self._git(
+                "status", "--porcelain=v1", "--untracked-files=normal"
+            ),
+            self._rev_parse(f"refs/heads/{UPDATE_LOCAL_BRANCH}"),
+        )
         dirty_files = [line for line in status_text.splitlines() if line.strip()]
         data_inside = self._data_dir_inside_project()
         remote_url = ""
@@ -396,7 +404,6 @@ class UpdateService:
             remote_url = self._remote_url()
         except UpdateError as exc:
             remote_error = exc.message
-        local_main = await self._rev_parse(f"refs/heads/{UPDATE_LOCAL_BRANCH}")
         return {
             "repo": UPDATE_REPO_URL,
             "target_ref": UPDATE_REF,

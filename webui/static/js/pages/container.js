@@ -20,6 +20,9 @@ function badge(text, tone = '') {
 export async function render(container, ctx) {
   let status = null;
   let storageSetup = null;
+  let agentStatus = null;
+  let agentLoading = true;
+  let agentBusy = false;
   let lastError = null;
   let destroyed = false;
   const fileBrowser = createContainerFileBrowser(ctx);
@@ -46,6 +49,7 @@ export async function render(container, ctx) {
     refreshButton, testButton, setupButton, resetButton, configButton);
   const summaryHost = h('div', { class: 'grid grid-4' });
   const problemHost = h('div', {});
+  const agentHost = h('div', {});
   const detailHost = h('div', {});
   const storageHost = h('div', {});
   const page = h('div', { class: 'page' },
@@ -55,18 +59,32 @@ export async function render(container, ctx) {
         'Docker 容器只提供资源/文件隔离，不是对抗恶意代码的绝对安全边界。'
         + '默认无网络、无特权、非 root、只挂载专用 workspace。'
         + '首次使用直接点「一键准备 / 启动」；可在下方文件管理中只读浏览容器文件系统。这里的 /workspace 是容器存储，不是本机 AI 工作区；本机工作区请切到同一文件管理的「本机工作区」模式。')),
-    actionHost, summaryHost, problemHost, fileBrowser.el, detailHost, storageHost);
+    actionHost, summaryHost, problemHost, agentHost, fileBrowser.el, detailHost, storageHost);
   fill(container, page);
 
   async function refresh() {
     refreshButton.disabled = true;
+    agentLoading = true;
+    // 三个接口都依赖 Docker 但互相独立，串行等待会让 Agent 卡片明显变慢。
+    const agentsPromise = endpoints.containerAgents()
+      .then((data) => { agentStatus = data; })
+      .catch(() => { agentStatus = null; })
+      .finally(() => {
+        agentLoading = false;
+        if (!destroyed) renderAgents();
+      });
     try {
-      status = await endpoints.containerStatus();
-      try {
-        storageSetup = await endpoints.containerStorage();
-      } catch {
-        storageSetup = null;
+      const [statusResult, storageResult] = await Promise.allSettled([
+        endpoints.containerStatus(),
+        endpoints.containerStorage(),
+      ]);
+      if (statusResult.status !== 'fulfilled') {
+        throw statusResult.reason;
       }
+      status = statusResult.value;
+      storageSetup = storageResult.status === 'fulfilled'
+        ? storageResult.value
+        : null;
       if (!destroyed) renderAll();
     } catch (e) {
       if (!destroyed) {
@@ -74,6 +92,7 @@ export async function render(container, ctx) {
           empty(`读取容器状态失败：${e.message}`)));
       }
     } finally {
+      await agentsPromise.catch(() => {});
       refreshButton.disabled = false;
     }
   }
@@ -155,7 +174,149 @@ export async function render(container, ctx) {
           h('td', {}, label), h('td', {}, String(value)))))
         : empty('暂无存储路径信息')));
 
+    renderAgents();
     fileBrowser.setRunning(box.state === 'running');
+  }
+
+  async function runAgentAction(action, label) {
+    if (agentBusy) return;
+    agentBusy = true;
+    try {
+      await action();
+      ctx.toast(label, 'ok');
+      await refresh();
+    } catch (e) {
+      ctx.toast(e.message, 'error');
+    } finally {
+      agentBusy = false;
+    }
+  }
+
+  function renderAgents() {
+    if (agentLoading) {
+      fill(agentHost, card('Agent 模式', '',
+        empty('正在读取 Agent 模式…')));
+      return;
+    }
+    if (!agentStatus) {
+      fill(agentHost, card('Agent 模式', '',
+        empty('Agent 模式状态不可用；请先启动 Runtime 与容器。')));
+      return;
+    }
+    const modes = agentStatus.agents || [];
+    const rows = modes.map((item) => {
+      const installed = !!item.installed;
+      const active = !!item.active;
+      const version = installed
+        ? `已安装${item.version ? ` · ${item.version}` : ''}`
+        : '未安装';
+      const installButton = h('button', {
+        class: 'btn btn-sm',
+        disabled: agentBusy,
+        onclick: () => runAgentAction(
+          () => endpoints.installContainerAgent(item.id),
+          `已安装 ${item.label}`,
+        ),
+      }, installed ? '重装' : '安装');
+      const activateButton = h('button', {
+        class: 'btn btn-sm btn-primary',
+        disabled: agentBusy || !installed || active,
+        onclick: () => runAgentAction(
+          () => endpoints.activateContainerAgent(item.id),
+          `已激活 ${item.label}`,
+        ),
+      }, active ? '当前使用' : '激活');
+      const deactivateButton = h('button', {
+        class: 'btn btn-sm',
+        disabled: agentBusy || !active,
+        onclick: () => runAgentAction(
+          () => endpoints.deactivateContainerAgent(),
+          '已停用容器 Agent',
+        ),
+      }, '停用');
+      const deleteButton = h('button', {
+        class: 'btn btn-sm btn-danger',
+        disabled: agentBusy || !installed || active,
+        onclick: () => {
+          if (!globalThis.confirm(`卸载 ${item.label} 的容器运行时？不会删除 /workspace 文件。`)) return;
+          runAgentAction(
+            () => endpoints.deleteContainerAgent(item.id),
+            `已卸载 ${item.label}`,
+          );
+        },
+      }, '卸载');
+      return h('tr', {},
+        h('td', {},
+          h('strong', {}, item.label),
+          h('div', { class: 'field-help' }, item.description || ''),
+        ),
+        h('td', {}, badge(
+          active ? '使用中' : (installed ? '已安装' : '未安装'),
+          active ? 'ok' : (installed ? '' : 'warn'),
+        )),
+        h('td', {}, version),
+        h('td', {}, item.dependencies?.length
+          ? item.dependencies.join('、')
+          : '内置回退'),
+        h('td', {},
+          h('div', { class: 'row row-wrap' },
+            installButton, activateButton, deactivateButton, deleteButton)),
+      );
+    });
+
+    const hostInfo = agentStatus.host || {};
+    const executionSelect = h('select', {},
+      h('option', { value: 'sandbox', selected: hostInfo.execution_mode !== 'host' },
+        '沙箱联网（bubblewrap，推荐）'),
+      h('option', { value: 'host', selected: hostInfo.execution_mode === 'host' },
+        '直接控制整台电脑（高风险）'),
+    );
+    const networkInput = h('input', {
+      type: 'checkbox',
+      checked: hostInfo.sandbox_network !== false,
+    });
+    const saveHostButton = h('button', {
+      class: 'btn btn-sm',
+      disabled: agentBusy,
+      onclick: () => runAgentAction(
+        () => endpoints.saveContainerAgentHost({
+          execution_mode: executionSelect.value,
+          sandbox_network: !!networkInput.checked,
+        }),
+        '本机 Claude Code 执行方式已保存',
+      ),
+    }, '保存本机设置');
+
+    fill(agentHost, card(
+      'Agent 模式',
+      '仅向 KarenBot 的 LLM 提供 Pi / DSH / Claude Code 的工具语义，不启动它们的 TUI/GUI/WebUI。'
+        + '容器可安装多个模式，但同一时间只能激活一个；本机固定使用 Claude Code。',
+      table(
+        ['模式', '状态', '版本', '依赖', '操作'],
+        rows,
+      ),
+      h('div', { class: 'field-help', style: { marginTop: '12px' } },
+        '安装只写入 /workspace/.karen-agents，不会重建容器或删除 /workspace 文件。'
+        + '原生工具不需要外部 CLI 或额外依赖。'
+        + '建议在 设置 → 行为 → 工具 schema 档位 选择 agent，获得核心工具常加载 + '
+        + 'ToolSearch 延迟加载。'),
+      h('h3', { style: { marginTop: '18px' } }, '本机 Claude Code 执行方式'),
+      h('div', { class: 'row row-wrap' },
+        h('label', { class: 'field' },
+          h('span', { class: 'field-label' }, '命令执行'),
+          executionSelect,
+        ),
+        h('label', { class: 'field' },
+          h('span', { class: 'field-label' }, '沙箱联网'),
+          networkInput,
+        ),
+        h('div', { class: 'spacer' }),
+        saveHostButton,
+      ),
+      h('p', { class: 'field-help' },
+        '沙箱模式：只读系统目录 + workspace 可写，默认联网；host 模式：命令直接以当前用户控制整台电脑。'
+        + 'host 模式风险很高，只在你明确需要时使用。'),
+    ));
   }
 
   function renderProblems(info, storage, docker, mismatch) {

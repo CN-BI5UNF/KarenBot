@@ -414,14 +414,19 @@ class MessagePipeline(
             == "routed"
         )
 
-    def _toolset_session_for(self, conversation_id: str | None) -> ToolsetSession | None:
-        """Return the per-conversation routed toolset session, if enabled.
+    def _agent_profile_enabled(self) -> bool:
+        return (
+            str(getattr(self.tool_registry, "schema_profile", "compact"))
+            == "agent"
+        )
 
-        Routed state is memory-only: loaded sets survive model turns inside one
-        runtime process and are isolated by conversation id.
+    def _toolset_session_for(self, conversation_id: str | None) -> ToolsetSession | None:
+        """Return the per-conversation tool state holder.
+
+        Routing/lazy-loading state is used by routed/agent profiles; compact and
+        full profiles still use the same holder for coding-agent todo/plan state.
+        State is memory-only and isolated by conversation id.
         """
-        if not self._tool_routing_enabled():
-            return None
         key = str(conversation_id or "global")
         session = self._toolset_sessions.get(key)
         if session is None:
@@ -436,14 +441,18 @@ class MessagePipeline(
         return session
 
     def _tool_schemas_for(self, session: ToolsetSession | None):
-        if session is None:
-            return self.tool_registry.get_schemas()
-        return self.tool_registry.get_routed_schemas(session)
+        if self._agent_profile_enabled():
+            return self.tool_registry.get_agent_schemas(session)
+        if self._tool_routing_enabled():
+            return self.tool_registry.get_routed_schemas(session)
+        return self.tool_registry.get_schemas()
 
     def _tools_provider_for(self, session: ToolsetSession | None):
-        if session is None:
-            return None
-        return lambda: self.tool_registry.get_routed_schemas(session)
+        if self._agent_profile_enabled():
+            return lambda: self.tool_registry.get_agent_schemas(session)
+        if self._tool_routing_enabled():
+            return lambda: self.tool_registry.get_routed_schemas(session)
+        return None
 
     def mark_activity(self) -> None:
         """刷新活动时间。主动思考只在足够空闲后触发。"""

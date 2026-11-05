@@ -374,10 +374,24 @@ class SetMsgEmojiLikeArgs(_ToolArgs):
 class ToolSearchArgs(_ToolArgs):
     """tool_search 工具参数。"""
 
-    tool_name: str = Field(
-        ...,
+    tool_name: str | None = Field(
+        default=None,
         min_length=1,
-        description="要查询说明和真实参数的工具名。",
+        description="要查询说明和真实参数的工具名；与 select/query 三选一。",
+    )
+    select: list[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description=(
+            "agent 档位下要加载的精确工具名列表（1-10 个）；加载后下一次请求"
+            "会出现这些工具的 schema。与 tool_name/query 三选一。"
+        ),
+    )
+    query: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="按关键词发现工具；只返回候选，不自动加载。与 tool_name/select 三选一。",
     )
     detail: Literal["summary", "full"] = Field(
         default="summary",
@@ -387,6 +401,12 @@ class ToolSearchArgs(_ToolArgs):
         default=None,
         description="可选：你为什么需要这个工具。用于返回更贴合的风险提醒，不会发给 QQ。",
     )
+
+    @model_validator(mode="after")
+    def _require_query_target(self) -> ToolSearchArgs:
+        if not self.tool_name and not self.select and not self.query:
+            raise ValueError("tool_name、select、query 至少提供一个")
+        return self
 
 
 # ============================================================

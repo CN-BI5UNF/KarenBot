@@ -318,6 +318,12 @@ def test_all_expected_tools_registered():
         # knowledge / web research / slang lookup tools
         "save_knowledge_note", "research_web_to_prompt",
         "list_knowledge_notes", "delete_knowledge_note", "lookup_slang",
+        # native coding-agent tools
+        "agent_read", "agent_write", "agent_edit", "agent_apply_patch", "agent_bash",
+        "agent_glob", "agent_grep", "agent_ls", "agent_notebook_edit",
+        "agent_spawn", "agent_todo",
+        "agent_enter_plan", "agent_exit_plan",
+        "agent_tool_create", "agent_tool_list", "agent_tool_run", "agent_tool_delete",
         # controlled Docker container
         "container",
     }
@@ -823,4 +829,6 @@ def test_compact_profile_reduces_tools_and_hides_advanced_fields():
         )
         for schema in schemas
     )
-    assert total_tokens <= 5_500
+    # Native coding-agent tools add 14 stub schemas (name + one-line brief);
+    # they are still lazy and only expand after tool_search.
+    assert total_tokens <= 6_600

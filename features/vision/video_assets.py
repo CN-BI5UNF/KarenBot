@@ -37,6 +37,10 @@ from utils.video_contracts import (
 )
 
 _MAX_LOCAL_READ_CHUNK = 64 * 1024
+_UNAVAILABLE_VIDEO_CODES = frozenset(
+    {"video_source_unavailable", "video_asset_corrupt"}
+)
+_UNAVAILABLE_VIDEO_TEXT = "[视频不可用：原视频已被清理或损坏]"
 
 
 def _check_size(data: bytes, limit: int) -> bytes:
@@ -152,8 +156,19 @@ class VideoAssetStore:
         }
         return validate_video_asset_ref(ref, limits=self.limits)
 
-    async def project_record(self, record: dict[str, Any]) -> dict[str, Any]:
-        """Copy-on-write projection of trusted video metadata."""
+    async def project_record(
+        self,
+        record: dict[str, Any],
+        *,
+        drop_unavailable: bool = False,
+        dropped: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Copy-on-write projection of trusted video metadata.
+
+        ``drop_unavailable`` mirrors the image store: missing/corrupt stored
+        videos become text placeholders so one cleaned-up attachment cannot
+        block every later request.  Malformed refs remain strict.
+        """
         if record.get("role") != "user":
             return record
         metadata = record.get("metadata")
@@ -170,19 +185,60 @@ class VideoAssetStore:
                 "视频历史消息正文格式无效", code="video_projection_failed"
             )
         refs = [validate_video_asset_ref(asset, limits=self.limits) for asset in assets]
-        video_parts = [await self.video_content(ref) for ref in refs]
+        kept_refs: list[dict[str, Any]] = []
+        video_parts: list[dict[str, Any]] = []
+        unavailable = 0
+        for ref in refs:
+            try:
+                part = await self.video_content(ref)
+            except VideoAssetError as exc:
+                if (
+                    not drop_unavailable
+                    or exc.code not in _UNAVAILABLE_VIDEO_CODES
+                ):
+                    raise
+                unavailable += 1
+                if dropped is not None:
+                    dropped.append(dict(ref))
+                continue
+            kept_refs.append(ref)
+            video_parts.append(part)
+        if isinstance(content, str):
+            blocks: list[dict[str, Any]] = [{"type": "text", "text": content}]
+        else:
+            blocks = list(content)
+        if unavailable:
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": "\n".join(
+                        _UNAVAILABLE_VIDEO_TEXT for _ in range(unavailable)
+                    ),
+                }
+            )
         projected = dict(record)
         projected["metadata"] = copy.deepcopy(dict(metadata))
-        projected["content"] = build_video_content_blocks(
-            content, refs, video_parts
-        )
+        projected["metadata"]["video_assets"] = kept_refs
+        if kept_refs:
+            blocks = build_video_content_blocks(blocks, kept_refs, video_parts)
+        projected["content"] = blocks
         return projected
 
     async def project_records(
         self,
         records: Sequence[dict[str, Any]],
+        *,
+        drop_unavailable: bool = False,
+        dropped: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        return [await self.project_record(record) for record in records]
+        return [
+            await self.project_record(
+                record,
+                drop_unavailable=drop_unavailable,
+                dropped=dropped,
+            )
+            for record in records
+        ]
 
     async def video_content(self, asset: Mapping[str, Any]) -> dict[str, Any]:
         """Create an independent OpenAI-compatible video_url content block."""

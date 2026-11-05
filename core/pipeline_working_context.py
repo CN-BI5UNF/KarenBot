@@ -461,20 +461,24 @@ class PipelineWorkingContextMixin:
 
             routing_check = getattr(self, "_tool_routing_enabled", None)
             routed = bool(routing_check()) if callable(routing_check) else False
+            agent_check = getattr(self, "_agent_profile_enabled", None)
+            agent = bool(agent_check()) if callable(agent_check) else False
             system_content = build_combined_system_prompt(
                 self.persona,
                 memory_mode=self.features_cfg.long_term_memory.mode,
                 eat_tool=bool(getattr(self, "eat_tool", False)),
                 sleep_tool=bool(getattr(self, "sleep_tool", False)),
                 tool_routing=routed,
+                tool_lazy=agent,
             )
             tools = None
             if getattr(self, "tool_registry", None) is not None:
-                tools = (
-                    self.tool_registry.get_routed_schemas()
-                    if routed
-                    else self.tool_registry.get_schemas()
-                )
+                if agent:
+                    tools = self.tool_registry.get_agent_schemas()
+                elif routed:
+                    tools = self.tool_registry.get_routed_schemas()
+                else:
+                    tools = self.tool_registry.get_schemas()
             fixed_messages = [{"role": "system", "content": system_content}]
             admin_info = build_admin_info(self.persona)
             if admin_info:
@@ -1021,14 +1025,19 @@ class PipelineWorkingContextMixin:
                     "未配置图片 workspace，无法向主模型提供图片",
                     code="image_source_unavailable",
                 )
-            projected = await store.project_records(result.messages)
+            dropped: list[dict[str, Any]] = []
+            projected = await store.project_records(
+                result.messages,
+                drop_unavailable=True,
+                dropped=dropped,
+            )
             image_count, image_bytes = assert_wire_request_fits(
                 projected,
                 tools_schema=tools_schema,
                 limits=limits,
                 provider_limit_bytes=self._provider_request_body_limit_bytes(),
             )
-            if image_count != usage.image_count:
+            if image_count + len(dropped) != usage.image_count:
                 raise ImageAssetError(
                     "图片投影数量与声明不一致",
                     code="image_projection_failed",
@@ -1095,7 +1104,14 @@ class PipelineWorkingContextMixin:
         result.image_bytes = image_bytes
         result.request_body_bytes = body_bytes
         result.budget_basis = usage.basis
-        result.contains_images = True
+        result.contains_images = image_count > 0
+        if dropped:
+            result.attempts.append(f"images:dropped_unavailable:{len(dropped)}")
+            logger.warning(
+                "主模型图片投影跳过不可用历史资产 count=%d phase=%s",
+                len(dropped),
+                phase,
+            )
         return result
 
     async def _finalize_main_prompt_videos(
@@ -1120,7 +1136,12 @@ class PipelineWorkingContextMixin:
                     "未配置视频 workspace，无法向主模型提供视频",
                     code="video_source_unavailable",
                 )
-            projected = await store.project_records(result.messages)
+            dropped: list[dict[str, Any]] = []
+            projected = await store.project_records(
+                result.messages,
+                drop_unavailable=True,
+                dropped=dropped,
+            )
             video_count, video_bytes = assert_wire_video_request_fits(
                 projected,
                 tools_schema=tools_schema,
@@ -1128,7 +1149,7 @@ class PipelineWorkingContextMixin:
                 provider_limit_bytes=self._provider_request_body_limit_bytes(),
                 encoded_image_bytes=result.image_bytes,
             )
-            if video_count != result.video_count:
+            if video_count + len(dropped) != result.video_count:
                 raise VideoAssetError(
                     "视频投影数量与声明不一致",
                     code="video_projection_failed",
@@ -1194,7 +1215,14 @@ class PipelineWorkingContextMixin:
         if profile is not None:
             result.video_tokens = video_count * profile.per_video_tokens
         result.request_body_bytes = body_bytes
-        result.contains_videos = True
+        result.contains_videos = video_count > 0
+        if dropped:
+            result.attempts.append(f"videos:dropped_unavailable:{len(dropped)}")
+            logger.warning(
+                "主模型视频投影跳过不可用历史资产 count=%d phase=%s",
+                len(dropped),
+                phase,
+            )
         return result
 
     async def _prepare_main_prompt_for_model(

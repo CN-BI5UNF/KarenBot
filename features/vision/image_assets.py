@@ -56,6 +56,11 @@ from utils.image_contracts import (
 
 TRANSFORM_VERSION = TRANSFORM_VERSION_V2
 _SUPPORTED_FORMATS = frozenset({"JPEG", "PNG", "GIF", "WEBP"})
+_UNAVAILABLE_IMAGE_CODES = frozenset(
+    {"image_asset_missing", "image_asset_corrupt"}
+)
+_UNAVAILABLE_IMAGE_TEXT = "[图片不可用：原图已被清理或损坏]"
+
 _OUTPUT_FORMATS = {
     "image/jpeg": ("JPEG", ".jpg"),
     "image/png": ("PNG", ".png"),
@@ -745,8 +750,20 @@ class ImageAssetStore:
             },
         }
 
-    async def project_record(self, record: dict[str, Any]) -> dict[str, Any]:
-        """Copy-on-write projection of trusted metadata, never display markers."""
+    async def project_record(
+        self,
+        record: dict[str, Any],
+        *,
+        drop_unavailable: bool = False,
+        dropped: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Copy-on-write projection of trusted metadata, never display markers.
+
+        ``drop_unavailable`` is for long-lived history: a file deleted by user
+        cleanup or damaged on disk becomes a text placeholder instead of
+        poisoning every later request.  Malformed metadata and unsafe paths
+        still fail strictly; only known missing/corrupt storage is tolerated.
+        """
         if record.get("role") != "user":
             return record
         metadata = record.get("metadata")
@@ -761,19 +778,59 @@ class ImageAssetStore:
         if not isinstance(text, str):
             raise ImageAssetError("图片历史消息正文格式无效")
         refs = [self._checked_reference(asset) for asset in assets]
-        image_parts = [await self.image_content(ref) for ref in refs]
-        blocks = build_image_content_blocks(text, refs, image_parts)
+        kept_refs: list[dict[str, Any]] = []
+        image_parts: list[dict[str, Any]] = []
+        unavailable = 0
+        for ref in refs:
+            try:
+                part = await self.image_content(ref)
+            except ImageAssetError as exc:
+                if (
+                    not drop_unavailable
+                    or exc.code not in _UNAVAILABLE_IMAGE_CODES
+                ):
+                    raise
+                unavailable += 1
+                if dropped is not None:
+                    dropped.append(dict(ref))
+                continue
+            kept_refs.append(ref)
+            image_parts.append(part)
+        if unavailable:
+            text = (
+                text.rstrip()
+                + "\n"
+                + "\n".join(
+                    _UNAVAILABLE_IMAGE_TEXT for _ in range(unavailable)
+                )
+            )
         projected = dict(record)
         projected["metadata"] = copy.deepcopy(dict(metadata))
-        projected["content"] = blocks
+        projected["metadata"]["image_assets"] = kept_refs
+        if kept_refs:
+            projected["content"] = build_image_content_blocks(
+                text, kept_refs, image_parts
+            )
+        else:
+            projected["content"] = text
         return projected
 
     async def project_records(
         self,
         records: Sequence[dict[str, Any]],
+        *,
+        drop_unavailable: bool = False,
+        dropped: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Project in order without modifying history or dropping failed assets."""
-        return [await self.project_record(record) for record in records]
+        return [
+            await self.project_record(
+                record,
+                drop_unavailable=drop_unavailable,
+                dropped=dropped,
+            )
+            for record in records
+        ]
 
     def _relative_path(
         self,
@@ -844,7 +901,8 @@ class ImageAssetStore:
             raise
         except (OSError, ValueError):
             raise ImageAssetError(
-                "图片资产文件缺失、损坏或路径不安全"
+                "图片资产文件缺失、损坏或路径不安全",
+                code="image_asset_missing",
             ) from None
         finally:
             if fd is not None:
@@ -870,7 +928,10 @@ class ImageAssetStore:
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
-                raise ImageAssetError("图片资产文件无效或大小超限")
+                raise ImageAssetError(
+                    "图片资产文件无效或大小超限",
+                    code="image_asset_corrupt",
+                )
             return _check_size(
                 stream.read(max_bytes + 1),
                 max_bytes,

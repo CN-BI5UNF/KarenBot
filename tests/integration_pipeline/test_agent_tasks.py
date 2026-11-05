@@ -272,6 +272,100 @@ async def test_agent_task_returns_after_target_output_written(build_pipeline, tm
 
 @pytest.mark.asyncio
 
+async def test_coding_agent_task_exposes_coding_tools(build_pipeline, tmp_path):
+
+    pipeline, _, _, _, _ = await build_pipeline([])
+
+    workspace = tmp_path / "workspace"
+
+    workspace.mkdir()
+
+    pipeline.workspace_dir = workspace
+
+    captured: dict = {}
+
+    async def fake_run(messages, **kwargs):
+
+        captured["messages"] = messages
+
+        captured["tools"] = kwargs.get("tools") or []
+
+        return AgentRunResult(
+
+            final_content="检查完成，没有发现问题。",
+
+            records=[],
+
+            loop_count=1,
+
+            finish_reason="no_action",
+
+        )
+
+    pipeline.chat_agent.run = fake_run  # type: ignore[method-assign]
+
+    result = await pipeline._run_agent_task(
+
+        "task-coding",
+
+        {
+
+            "prompt": "检查 workspace 中的文本文件",
+
+            "output_format": "markdown",
+
+            "output_name": "coding.md",
+
+            "coding_target": "host",
+
+            "sources": [{"type": "inline_text", "value": "只读检查"}],
+
+        },
+
+        conversation_id="private:123",
+
+        default_target=None,
+
+    )
+
+    tool_names = {
+
+        item["function"]["name"]
+
+        for item in captured["tools"]
+
+        if isinstance(item, dict) and "function" in item
+
+    }
+
+    assert "agent_read" in tool_names
+
+    assert "agent_write" in tool_names
+
+    assert "agent_bash" in tool_names
+
+    assert "agent_ls" in tool_names
+
+    assert "agent_apply_patch" in tool_names
+
+    assert "send_group_message" not in tool_names
+
+    system_prompt = captured["messages"][0]["content"]
+
+    assert "后台编码子 Agent" in system_prompt
+
+    assert "target=host" in system_prompt
+
+    result_path = workspace / "agent_tasks" / "task-coding" / "coding.md"
+
+    assert result_path.read_text(encoding="utf-8") == "检查完成，没有发现问题。"
+
+    assert result["ok"] is True
+
+    assert result["status"] == "completed"
+
+@pytest.mark.asyncio
+
 async def test_agent_task_timeout_returns_existing_target_output(
 
     build_pipeline,

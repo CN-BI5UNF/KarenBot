@@ -464,6 +464,28 @@ async def test_first_and_retry_success_both_go_through_finalize(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_cleaned_up_history_asset_is_dropped_instead_of_blocking_turn(tmp_path):
+    pipeline = _make_pipeline(tmp_path)
+    ref = await _ref(tmp_path, pipeline)
+    (pipeline.workspace_dir / ref["path"]).unlink()
+
+    result = await MessagePipeline._prepare_main_prompt_for_model(
+        pipeline,
+        conversation_id="private:1",
+        phase="test",
+        tools_schema=None,
+        rebuild_messages=lambda: asyncio.sleep(0, result=_messages([ref])),
+    )
+
+    assert result.ok is True, result.failure_code
+    assert result.contains_images is False
+    assert result.image_count == 0
+    assert not _wire_has_image(result.messages)
+    assert "图片不可用" in json.dumps(result.messages, ensure_ascii=False)
+    assert any("dropped_unavailable" in attempt for attempt in result.attempts)
+
+
+@pytest.mark.asyncio
 async def test_invalid_refs_and_multidimensional_excess_fail_before_store(tmp_path):
     pipeline = _make_pipeline(tmp_path)
     ref = await _ref(tmp_path, pipeline)

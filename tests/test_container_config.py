@@ -31,6 +31,29 @@ def test_container_defaults_are_safe_and_disabled():
     assert FeaturesConfig().container.enabled is False
 
 
+def test_container_agent_defaults_and_validation():
+    cfg = ContainerFeatureConfig()
+    assert cfg.agent.active_mode == "off"
+    assert cfg.agent.host_execution == "sandbox"
+    assert cfg.agent.sandbox_network is True
+
+    enabled = ContainerFeatureConfig(
+        agent={
+            "active_mode": "dsh",
+            "host_execution": "host",
+            "sandbox_network": False,
+        }
+    )
+    assert enabled.agent.active_mode == "dsh"
+    assert enabled.agent.host_execution == "host"
+    assert enabled.agent.sandbox_network is False
+
+    with pytest.raises(ValidationError):
+        ContainerFeatureConfig(agent={"active_mode": "unknown"})
+    with pytest.raises(ValidationError):
+        ContainerFeatureConfig(agent={"host_execution": "root"})
+
+
 def test_container_names_and_image_validation():
     with pytest.raises(ValidationError):
         ContainerFeatureConfig(container_name="-bad")

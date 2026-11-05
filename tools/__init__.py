@@ -32,6 +32,7 @@ from dataclasses import replace
 # 导入各模块的副作用：注册装饰器把工具加入全局列表
 from . import (  # noqa: F401
     agent_task_tools,
+    coding_tools,
     container_tools,
     control_tools,
     emoji_tools,
@@ -339,6 +340,23 @@ STUB_SCHEMA_TOOLS: set[str] = {
     "save_knowledge_note",
     "research_web_to_prompt",
     "delete_knowledge_note",
+    "agent_read",
+    "agent_write",
+    "agent_edit",
+    "agent_apply_patch",
+    "agent_bash",
+    "agent_glob",
+    "agent_grep",
+    "agent_ls",
+    "agent_notebook_edit",
+    "agent_spawn",
+    "agent_todo",
+    "agent_enter_plan",
+    "agent_exit_plan",
+    "agent_tool_create",
+    "agent_tool_list",
+    "agent_tool_run",
+    "agent_tool_delete",
 }
 """低频/高风险/大 schema 工具：常驻名称与简述，调用前通过 tool_search 查询参数摘要。
 
@@ -390,6 +408,23 @@ _STUB_SHORT_DESCRIPTIONS: dict[str, str] = {
     "web_fetch": "读取单个公开网页的正文。",
     "chat_selection": "暂停、恢复或限定群聊接收范围。",
     "group_trigger_window": "打开、延长或关闭群聊 @ 触发窗口。",
+    "agent_read": "读取本机或容器文件并返回带行号的文本。",
+    "agent_write": "创建或覆盖本机/容器文本文件。",
+    "agent_edit": "用精确字符串替换本机/容器文件内容。",
+    "agent_apply_patch": "应用 unified diff 补丁，支持多文件新建/修改/删除。",
+    "agent_bash": "在本机沙箱或容器内执行 shell 命令。",
+    "agent_glob": "按 glob 查找本机或容器文件。",
+    "agent_grep": "在本机或容器文件内容中搜索。",
+    "agent_ls": "列出本机或容器目录内容。",
+    "agent_notebook_edit": "编辑 Jupyter notebook 单元格（替换/插入/删除）。",
+    "agent_spawn": "启动真正的后台编码子 Agent 并等待其返回结果。",
+    "agent_todo": "替换当前会话的编码待办列表。",
+    "agent_enter_plan": "进入只读计划模式。",
+    "agent_exit_plan": "提交计划并退出计划模式。",
+    "agent_tool_create": "让 LLM 编写并保存 Pi/DSH 自定义 Python 工具。",
+    "agent_tool_list": "列出容器中已保存的自定义工具。",
+    "agent_tool_run": "执行一个已保存的自定义工具（stdin 传 JSON 参数）。",
+    "agent_tool_delete": "删除一个已保存的自定义工具。",
 }
 
 
@@ -413,6 +448,15 @@ _STUB_RISK_LEVELS: dict[str, str] = {
     "research_web_to_prompt": "medium",
     "delete_knowledge_note": "medium",
     "web_fetch": "medium",
+    "agent_write": "medium",
+    "agent_edit": "medium",
+    "agent_apply_patch": "medium",
+    "agent_notebook_edit": "medium",
+    "agent_spawn": "high",
+    "agent_bash": "high",
+    "agent_tool_create": "high",
+    "agent_tool_run": "high",
+    "agent_tool_delete": "medium",
 }
 
 
@@ -452,6 +496,7 @@ def build_default_registry(config) -> ToolRegistry:
         or "compact"
     )
     routed = schema_profile == "routed"
+    agent = schema_profile == "agent"
     unmapped = unclassified_tools({spec.name for spec in specs})
     if unmapped:
         raise ValueError(
@@ -478,9 +523,9 @@ def build_default_registry(config) -> ToolRegistry:
             continue
 
         configured = spec
-        if routed:
-            # Routed mode: every available tool uses a compact schema, but only
-            # core tools and loaded toolsets are exposed by the schema provider.
+        if routed or agent:
+            # Routed/agent mode: every available tool uses a compact schema;
+            # exposure is decided per request by the schema provider.
             configured = replace(
                 spec,
                 schema_mode=ToolSchemaMode.COMPACT,
@@ -530,7 +575,7 @@ def build_default_registry(config) -> ToolRegistry:
     registry = ToolRegistry(enabled, schema_profile=schema_profile)
     logger.info(
         f"build_default_registry: 启用 {len(registry)} 个工具 "
-        f"(schema_profile={schema_profile}, routed={routed}, memory_mode={memory_mode}, "
+        f"(schema_profile={schema_profile}, routed={routed}, agent={agent}, memory_mode={memory_mode}, "
         f"vision={features.vision.enabled}, "
         f"web_search={features.web_search.enabled}, "
         f"weather={features.weather.enabled}, "

@@ -329,6 +329,33 @@ async def test_project_record_is_copy_on_write_and_not_idempotent(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_missing_history_asset_can_be_dropped_with_placeholder(tmp_path):
+    store = ImageAssetStore(tmp_path / "workspace")
+    ref = await store.ingest(_png_bytes(), message_id="gone", index=0)
+    record = {
+        "role": "user",
+        "content": "请看图",
+        "metadata": {"image_assets": [ref], "messages": [{"message_id": "gone"}]},
+    }
+    (tmp_path / "workspace" / ref["path"]).unlink()
+
+    with pytest.raises(ImageAssetError):
+        await store.project_record(record)
+
+    dropped: list[dict] = []
+    projected = await store.project_record(
+        record,
+        drop_unavailable=True,
+        dropped=dropped,
+    )
+    assert len(dropped) == 1
+    assert projected["metadata"]["image_assets"] == []
+    assert isinstance(projected["content"], str)
+    assert "图片不可用" in projected["content"]
+    assert "data:image" not in json.dumps(projected, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
 async def test_project_records_keeps_multi_message_attribution(tmp_path):
     store = ImageAssetStore(tmp_path / "workspace")
     ref_a = await store.ingest(_png_bytes(16, 16, (255, 0, 0)), message_id="a", index=0)

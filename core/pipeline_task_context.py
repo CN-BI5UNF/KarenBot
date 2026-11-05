@@ -183,10 +183,12 @@ class PipelineTaskContextMixin:
     ) -> dict[str, Any]:
         policy = self._model_view_policy()
         routing_check = getattr(self, "_tool_routing_enabled", None)
+        lazy_check = getattr(self, "_agent_profile_enabled", None)
         flags = {
             "eat_tool": bool(getattr(self, "eat_tool", False)),
             "sleep_tool": bool(getattr(self, "sleep_tool", False)),
             "tool_routing": bool(routing_check()) if callable(routing_check) else False,
+            "tool_lazy": bool(lazy_check()) if callable(lazy_check) else False,
             "cache_friendly_history": policy.enabled,
             "model_view_policy": policy,
         }

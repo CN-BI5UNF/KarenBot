@@ -159,6 +159,13 @@ Desktop 的 bind mount 必须指向 Docker 可访问的盘符路径；如果 Doc
 - `reset`：删除并重建容器，保留持久卷/挂载数据。
 - `status` / `storage`：容器和存储诊断。
 
+## 编码 Agent 模式
+
+容器页还提供 Pi / DSH / Claude Code 三种编码 Agent 模式。它们是 KarenBot 原生
+工具语义，不会启动第三方 TUI/GUI/WebUI；可同时安装多个，但同一时间只激活一个。
+详细能力矩阵、延迟 schema 加载、本机沙箱/整机模式和自定义工具协议见
+[`agent_modes.md`](agent_modes.md)。
+
 ## CLI
 
 ```bash

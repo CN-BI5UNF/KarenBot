@@ -262,6 +262,17 @@ export const endpoints = {
     `/api/container/files/raw?path=${encodeURIComponent(path)}`,
   containerTest: () => api.post('/api/container/test', {}, { timeoutMs: 660000 }),
   containerReset: () => api.post('/api/container/reset', {}, { timeoutMs: 60000 }),
+  containerAgents: () => api.get('/api/container/agents', { timeoutMs: 60000 }),
+  installContainerAgent: (mode) =>
+    api.post(`/api/container/agents/${encodeURIComponent(mode)}/install`, {}, { timeoutMs: 180000 }),
+  activateContainerAgent: (mode) =>
+    api.post(`/api/container/agents/${encodeURIComponent(mode)}/activate`, {}, { timeoutMs: 60000 }),
+  deactivateContainerAgent: () =>
+    api.post('/api/container/agents/deactivate', {}, { timeoutMs: 60000 }),
+  deleteContainerAgent: (mode) =>
+    api.del(`/api/container/agents/${encodeURIComponent(mode)}`, { timeoutMs: 60000 }),
+  saveContainerAgentHost: (payload) =>
+    api.patch('/api/container/agents/host', payload, { timeoutMs: 60000 }),
 
   settings: () => api.get('/api/settings'),
   patchSetting: (path, value) => api.patch('/api/settings', { path, value }),

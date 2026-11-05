@@ -291,18 +291,71 @@ def _call_subconscious_starter_fallback(
             return starter(state_snapshot if prefer_state_snapshot else event)
 
 
+def _strip_trailing_commas(text: str) -> str:
+    """Remove commas before ``}``/``]`` outside JSON strings.
+
+    LLMs occasionally emit a valid-looking object with trailing commas; this
+    conservative repair lets the persona updater recover without touching
+    string contents or changing field values.
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(text):
+        ch = text[index]
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            index += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            index += 1
+            continue
+        if ch == ",":
+            lookahead = index + 1
+            while lookahead < len(text) and text[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(text) and text[lookahead] in "}]":
+                index += 1
+                continue
+        out.append(ch)
+        index += 1
+    return "".join(out)
+
+
 def _parse_json_object(text: str) -> dict[str, Any] | None:
     raw = (text or "").strip()
-    start = raw.find("{")
-    end = raw.rfind("}") + 1
-    if start == -1 or end <= start:
+    if not raw:
         return None
-    try:
-        parsed = json.loads(raw[start:end])
-    except json.JSONDecodeError:
-        logger.debug("人格管理 JSON 解析失败", exc_info=True)
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    decoder = json.JSONDecoder()
+    # Sanitized first: a malformed outer object must not lose to a valid
+    # nested object that appears earlier in the raw scan order.
+    for candidate in (_strip_trailing_commas(raw), raw):
+        best: tuple[int, dict[str, Any]] | None = None
+        starts = [
+            index for index, ch in enumerate(candidate) if ch == "{"
+        ][:256]
+        for start in starts:
+            try:
+                parsed, end = decoder.raw_decode(candidate[start:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                span = end - start
+                if best is None or span > best[0]:
+                    best = (span, parsed)
+        if best is not None:
+            return best[1]
+    logger.debug("人格管理 JSON 解析失败")
+    return None
 
 
 _ACTION_TODO_SCOPE_BY_TYPE = {

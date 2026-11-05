@@ -885,6 +885,23 @@ class EmbeddingFeatureConfig(StrictModel):
     local_model_dir: str = ""
 
 
+class ContainerAgentConfig(StrictModel):
+    """Container coding-agent mode and host execution policy.
+
+    Native tool semantics only: selecting a mode installs its helper runtime,
+    it never starts that agent's TUI/GUI/WebUI.
+    """
+
+    active_mode: Literal["off", "pi", "dsh", "claude_code"] = "off"
+    """当前容器 Agent 模式；同一时间只能激活一个。off 表示不向 LLM 提供容器编码工具。"""
+
+    host_execution: Literal["sandbox", "host"] = "sandbox"
+    """本机 Claude Code 工具的命令执行方式：sandbox=bubblewrap，host=直接控制本机。"""
+
+    sandbox_network: bool = True
+    """沙箱模式是否允许联网；默认联网。host 模式始终使用宿主网络。"""
+
+
 class ContainerFeatureConfig(StrictModel):
     """受控 Docker 容器工具。默认关闭；B 命名卷开箱即用，C 固定镜像为高级选项。"""
 
@@ -953,6 +970,9 @@ class ContainerFeatureConfig(StrictModel):
 
     image_fixed_image_path: str = Field(default="", max_length=1024)
     """C 模式镜像文件路径；留空使用数据目录下的 workspace.ext4 / .vhdx。"""
+
+    agent: ContainerAgentConfig = Field(default_factory=ContainerAgentConfig)
+    """容器 Agent 模式与本机 Claude Code 执行策略。"""
 
     @field_validator("container_name", "volume_name")
     @classmethod
@@ -1793,9 +1813,10 @@ class BehaviorConfig(StrictModel):
     summarize: SummarizeConfig = Field(default_factory=SummarizeConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
 
-    tool_schema_profile: Literal["compact", "full", "routed"] = "compact"
+    tool_schema_profile: Literal["compact", "full", "routed", "agent"] = "compact"
     """工具 schema 暴露档位：compact=核心字段直出、其余按需 tool_search；
-    full=旧行为；routed=双层路由（核心工具 + load_toolset 工具集 + tool_search）。"""
+    full=旧行为；routed=双层路由（核心工具 + load_toolset 工具集 + tool_search）；
+    agent=Claude-Code 式核心常加载 + ToolSearch 按工具延迟加载。"""
 
     kv_prompt_diagnostics: Literal["off", "summary", "full"] = "summary"
     """KV 诊断级别：off 关闭；summary 只做轻量计数；full 保留旧的全量序列化哈希。"""

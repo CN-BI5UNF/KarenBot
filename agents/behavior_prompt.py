@@ -51,6 +51,17 @@ _ROUTED_TOOLSET_POLICY = """<toolset_routing_policy>
 </toolset_routing_policy>"""
 
 
+_AGENT_TOOL_LOADING_POLICY = """<agent_tool_loading_policy>
+当前使用 Claude-Code 式工具加载：少量核心工具常加载，其余工具按需延迟加载。
+- 初始上下文只包含核心工具（发消息/收尾/tool_search + 读写/编辑/命令/glob/grep）。
+- 需要其他工具时，先调用 tool_search select=[工具名...]（一次 1-3 个）加载完整 schema；下一次模型请求才会出现该工具。
+- 不确定工具名时先用 tool_search query=关键词 发现候选；tool_search 不会联系 QQ。
+- 未加载工具直接调用会返回 need_tool_search，这不是任务失败，按 next 加载后重试一次即可。
+- 已加载工具在本会话内保持；不要一次加载大量工具，加载越多上下文和工具选择噪声越大。
+- 高级参数或完整 JSON schema 用 tool_search detail=full 查询。
+- 编码工具用 target=host/container 选择本机或容器；container 使用容器页当前激活的 Agent 模式。
+</agent_tool_loading_policy>"""
+
 _TOOL_USE_PROTOCOL_HEADER = """<tool_use_protocol priority="high">
 
 <messaging>
@@ -296,6 +307,7 @@ def build_tool_use_protocol(
     eat_tool: bool = False,
     sleep_tool: bool = False,
     tool_routing: bool = False,
+    tool_lazy: bool = False,
 ) -> str:
     """按长期记忆模式拼装工具使用协议。
 
@@ -305,6 +317,7 @@ def build_tool_use_protocol(
         eat_tool: 本轮工具列表是否提供 eat
         sleep_tool: 本轮工具列表是否提供 sleep
         tool_routing: 是否为 routed 工具集模式；只影响协议说明，不改变工具执行
+        tool_lazy: 是否为 agent 档位（核心常加载 + ToolSearch 延迟加载）
 
     Returns:
         完整的 <tool_use_protocol>...</tool_use_protocol> 字符串
@@ -321,6 +334,8 @@ def build_tool_use_protocol(
         middle_parts.append(physiology_block)
     if tool_routing:
         middle_parts.append(_ROUTED_TOOLSET_POLICY.strip())
+    if tool_lazy:
+        middle_parts.append(_AGENT_TOOL_LOADING_POLICY.strip())
     return (
         _TOOL_USE_PROTOCOL_HEADER
         + "\n"

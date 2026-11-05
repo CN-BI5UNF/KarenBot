@@ -324,6 +324,66 @@ async def test_all_tools_have_clear_results_in_simulated_runtime(tmp_path, monke
         "list_knowledge_notes": {},
         "lookup_slang": {"query": "难绷", "limit": 8},
         "delete_knowledge_note": {"entry_id": "abcdef123456"},
+        "agent_read": {"path": "note.txt", "target": "host"},
+        "agent_write": {
+            "path": "agent-created.txt",
+            "content": "agent\n",
+            "target": "host",
+        },
+        "agent_edit": {
+            "path": "note.txt",
+            "edits": [{"old_string": "old line", "new_string": "agent line"}],
+            "target": "host",
+        },
+        "agent_apply_patch": {
+            "patch": (
+                "--- a/note.txt\n"
+                "+++ b/note.txt\n"
+                "@@ -1,1 +1,1 @@\n"
+                "-old line\n"
+                "+patched line\n"
+            ),
+            "dry_run": True,
+            "target": "host",
+        },
+        "agent_bash": {
+            "command": "printf agent-ok",
+            "target": "host",
+            "timeout_seconds": 10,
+        },
+        "agent_glob": {"pattern": "*.txt", "target": "host"},
+        "agent_grep": {"pattern": "line", "glob": "*.txt", "target": "host"},
+        "agent_ls": {"path": ".", "target": "host"},
+        "agent_notebook_edit": {
+            "path": "missing.ipynb",
+            "edit_mode": "insert",
+            "new_source": "print(1)\n",
+            "target": "host",
+        },
+        "agent_spawn": {
+            "prompt": "检查 workspace 文本文件",
+            "context": "只做只读检查",
+            "max_loops": 3,
+            "target": "host",
+        },
+        "agent_todo": {
+            "todos": [{"content": "检查工具结果", "status": "in_progress"}],
+        },
+        "agent_enter_plan": {},
+        "agent_exit_plan": {"plan": "# 计划\n检查代码。"},
+        "agent_tool_create": {
+            "name": "smoke_tool",
+            "description": "smoke",
+            "code": "import json,sys\nprint(json.dumps(json.load(sys.stdin)))\n",
+            "target": "container",
+        },
+        "agent_tool_list": {"target": "container"},
+        "agent_tool_run": {
+            "name": "smoke_tool",
+            "arguments": {},
+            "target": "container",
+        },
+        "agent_tool_delete": {"name": "smoke_tool", "target": "container"},
         "container": {"action": "status"},
     }
     assert set(calls) == {spec.name for spec in get_default_specs()}

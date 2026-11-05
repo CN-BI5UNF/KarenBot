@@ -13,7 +13,7 @@ assert that every registered tool is classified.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 ToolsetRisk = Literal["low", "medium", "high"]
 
@@ -53,6 +53,24 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset(
     }
 )
 """Tools always exposed in routed mode (plus meta tools)."""
+
+AGENT_CORE_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "send_private_messages",
+        "send_group_message",
+        "commit_send_attempt",
+        "no_action",
+        "tool_search",
+        "agent_read",
+        "agent_write",
+        "agent_edit",
+        "agent_bash",
+        "agent_glob",
+        "agent_grep",
+        "agent_ls",
+    }
+)
+"""Claude-Code-style always-loaded core for the ``agent`` schema profile."""
 
 META_TOOL_NAMES: frozenset[str] = frozenset({"list_toolsets", "load_toolset"})
 
@@ -205,6 +223,34 @@ TOOLSETS: tuple[Toolset, ...] = (
         tools=("eat", "sleep", "work"),
     ),
     Toolset(
+        id="coding",
+        title="编码 Agent",
+        description=(
+            "本机/容器编码工具：读写、编辑、命令、glob、grep、目录；"
+            "host 固定 Claude Code 语义，container 使用当前激活的 Pi/DSH/Claude Code 模式。"
+        ),
+        tools=(
+            "agent_read",
+            "agent_write",
+            "agent_edit",
+            "agent_apply_patch",
+            "agent_bash",
+            "agent_glob",
+            "agent_grep",
+            "agent_ls",
+            "agent_notebook_edit",
+            "agent_spawn",
+            "agent_todo",
+            "agent_enter_plan",
+            "agent_exit_plan",
+            "agent_tool_create",
+            "agent_tool_list",
+            "agent_tool_run",
+            "agent_tool_delete",
+        ),
+        risk="high",
+    ),
+    Toolset(
         id="container",
         title="受控容器",
         description="在受控 Docker 容器内执行命令、读写容器 /workspace、诊断或重置；不是本机工作区。",
@@ -239,7 +285,10 @@ class ToolsetSession:
     """
 
     loaded: set[str] = field(default_factory=set)
+    loaded_tools: set[str] = field(default_factory=set)
     version: int = 0
+    agent_state: Any = None
+    """Per-conversation coding-agent state (todos/plan mode/custom tools)."""
 
     def load(self, name: str) -> bool:
         toolset = resolve_toolset(name)
@@ -251,8 +300,20 @@ class ToolsetSession:
         self.version += 1
         return True
 
+    def load_tool(self, name: str) -> bool:
+        """Load one tool schema for the ``agent`` profile."""
+        key = str(name or "").strip()
+        if not key or key in self.loaded_tools:
+            return False
+        self.loaded_tools.add(key)
+        self.version += 1
+        return True
+
     def loaded_ids(self) -> list[str]:
         return sorted(self.loaded)
+
+    def loaded_tool_ids(self) -> list[str]:
+        return sorted(self.loaded_tools)
 
     def allowed_tool_names(self) -> set[str]:
         return allowed_tool_names(self.loaded)
@@ -303,6 +364,7 @@ def catalog_snapshot() -> list[dict[str, object]]:
 
 
 __all__ = [
+    "AGENT_CORE_TOOL_NAMES",
     "CORE_TOOL_NAMES",
     "META_TOOL_NAMES",
     "TOOLSETS",

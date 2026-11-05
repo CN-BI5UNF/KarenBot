@@ -145,7 +145,8 @@ async def status(request: Request) -> dict[str, Any]:
     try:
         service = _service(request)
         data = await service.status()
-        notification = await service.available_snapshot()
+        # status() already resolved HEAD; avoid a second git rev-parse here.
+        notification = await service.available_snapshot(include_commit=False)
     except UpdateError as exc:
         raise _http_error(exc) from exc
     return {

@@ -24,7 +24,7 @@ The project is named **KarenBot** after **Karen**, Plankton's robot girlfriend i
 - Repository: <https://github.com/CN-BI5UNF/KarenBot>
 - Default branch: `main`
 - In-app update branch: `refactor/main`
-- Status: `1.0.1-beta` refactor snapshot; interfaces may still change
+- Status: `1.0.1-alpha` refactor snapshot; interfaces may still change
 
 > **Upstream and license**: KarenBot is derived from [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent) and its contributors. Original copyright notices are retained. KarenBot is released under **Apache-2.0**. See [NOTICE](NOTICE).
 

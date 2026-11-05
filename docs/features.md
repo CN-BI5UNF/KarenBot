@@ -61,6 +61,11 @@ WebUI「容器」页内置只读文件管理器，包含「本机工作区」和
 修改容器设置后不会强制重置已有容器：页面会提示配置变化，继续使用当前容器，
 新设置留到显式重建后生效，避免丢失容器层文件。详见 [容器文档](container.md)。
 
+容器页还提供 Pi / DSH / Claude Code 编码 Agent 模式：它们是 KarenBot 原生的
+读写、补丁、命令、子 Agent 和自定义工具语义，不启动第三方 TUI/GUI/WebUI。
+可同时安装多个，但同一时间只激活一个；本机固定 Claude Code 语义。详见
+[Agent 模式](agent_modes.md)。
+
 ### 3. 长期记忆
 
 Karen 会记住你在对话中告诉它的事：承诺、约定、偏好、身份信息.每条记忆带 scope（全局 / 某个人 / 某个群）和 pinned 标记.支持两种模式：
@@ -191,6 +196,7 @@ API 密钥用 AES-256-GCM + RSA-2048 加密, 存系统 keyring, 不需要记密�
 - **模型视图**：只裁剪发给模型的旧 `task_context`、发送回执和 `no_action` 配对；历史、归档、事件库原样保留。
 - **工具 schema 分级**：高频工具直出核心字段，低频/高风险工具按需 `tool_search detail=full`，固定 schema 开销约减半。
 - **工具双层路由（实验）**：`behavior.tool_schema_profile=routed` 初始只暴露核心工具和工具集目录；模型用 `list_toolsets` / `load_toolset` 加载所需工具集，再用 `tool_search` 查询高级参数。已加载集合按会话保持，未加载工具调用会返回 `need_toolset`。详见 [工具双层路由](tool_routing.md)。
+- **Agent 延迟加载**：`behavior.tool_schema_profile=agent` 只常驻发送/收尾和编码核心工具，其余用 `tool_search select=[...]` 按需加载；编码工具支持本机 workspace 和容器两种目标，详见 [Agent 模式](agent_modes.md)。
 - **发送成功自动收尾**：不再为收尾额外跑一次 `no_action` 模型调用。
 - **Token 计量**：规范 JSON 估算 messages + tools，按 provider/model 持久化校准，设置页可看估算误差和未命中输入。
 - **后台运行**：`karen start` / `karen stop` / `karen log` / `karen enable` / `karen disable` 短命令，底层是 systemd 用户服务；也支持 tmux、screen、nohup。完整排错文档见 [后台运行指南](background_running.md)。

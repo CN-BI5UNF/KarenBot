@@ -1051,12 +1051,23 @@ export async function render(container, ctx) {
   // 分页切换
   // ============================================================
 
-  async function appendUpdatePanel(nodes) {
+  function appendUpdatePanel(nodes) {
+    const host = h('div', {});
+    fill(host, card('版本与更新', '', empty('正在读取更新状态…')));
+    nodes.push(host);
+    // 同步先给出占位卡片，git 状态在后台加载，不阻塞整个设置分页。
+    loadUpdatePanel(host, ctx).catch((e) => {
+      fill(host, card('更新', '', empty(`读取更新状态失败：${e.message}`)));
+    });
+  }
+
+  async function loadUpdatePanel(host, ctx) {
+    const nodes = [];
     let status = null;
     try {
       status = await endpoints.updateStatus();
     } catch (e) {
-      nodes.push(card('更新', '', empty(`读取更新状态失败：${e.message}`)));
+      fill(host, card('更新', '', empty(`读取更新状态失败：${e.message}`)));
       return;
     }
     const notification = status.notification || {};
@@ -1159,6 +1170,7 @@ export async function render(container, ctx) {
     renderReleaseList(releaseHost, ctx, { showNotifyToggle: true })
       .then((handle) => { releaseList = handle; })
       .catch((e) => fill(releaseHost, empty(`读取版本列表失败：${e.message}`)));
+    fill(host, ...nodes);
   }
 
   function renderMirrorCard(status, ctx, onSaved) {
@@ -1599,7 +1611,7 @@ export async function render(container, ctx) {
       await appendSearchPanel(nodes, group);
     }
     if (key === 'update') {
-      await appendUpdatePanel(nodes);
+      appendUpdatePanel(nodes);
     }
     if (key === 'backup') {
       await appendBackupPanel(nodes);

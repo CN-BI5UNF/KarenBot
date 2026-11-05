@@ -182,17 +182,72 @@ class PipelineAgentTasksMixin:
                 "get_recent_chat_messages",
                 "recall_history",
             }
+            coding_target = str(payload.get("coding_target") or "").strip().lower()
+            if coding_target in {"host", "container"}:
+                allowed.update(
+                    {
+                        "agent_read",
+                        "agent_write",
+                        "agent_edit",
+                        "agent_apply_patch",
+                        "agent_bash",
+                        "agent_glob",
+                        "agent_grep",
+                        "agent_ls",
+                        "agent_todo",
+                        "agent_enter_plan",
+                        "agent_exit_plan",
+                    }
+                )
             if self.vision is not None or getattr(self, "main_vision", None) is not None:
                 allowed.add("describe_image")
+            coding = coding_target in {"host", "container"}
             sub_registry = ToolRegistry(
-                [spec for spec in get_default_specs() if spec.name in allowed]
+                [spec for spec in get_default_specs() if spec.name in allowed],
+                schema_profile="agent" if coding else "compact",
             )
+            agent_cfg = getattr(
+                getattr(self.features_cfg, "container", None), "agent", None
+            )
+            from features.coding_agent.state import AgentSessionState
+            from tools.toolsets import ToolsetSession
+
+            sub_session = ToolsetSession()
+            if coding:
+                for name in allowed:
+                    if name.startswith("agent_"):
+                        sub_session.load_tool(name)
+
+            sub_extras: dict[str, Any] = {
+                "chat_timeline": self.chat_timeline,
+                "tool_registry": sub_registry,
+                "tool_search_approved_tools": set(),
+                "agent_session": AgentSessionState(),
+                "agent_container_mode": str(
+                    getattr(agent_cfg, "active_mode", "off") or "off"
+                ),
+                "agent_host_execution": str(
+                    getattr(agent_cfg, "host_execution", "sandbox") or "sandbox"
+                ),
+                "agent_sandbox_network": bool(
+                    getattr(agent_cfg, "sandbox_network", True)
+                ),
+                "coding_subagent_target": coding_target,
+                "persona_image_store": getattr(self, "persona_image_store", None),
+                "persona_name": str(
+                    getattr(getattr(self, "persona", None), "name", "") or ""
+                ),
+            }
+            if coding:
+                sub_extras["toolset_session"] = sub_session
+
             sub_ctx = ToolContext(
                 adapter=self.adapter,
                 history=self.history,
                 archive=self.archive,
                 vision=self.vision,
                 main_vision=getattr(self, "main_vision", None),
+                container=getattr(self, "container", None),
                 workspace_dir=self.workspace_dir,
                 conversation_id=conversation_id,
                 default_history_fetch_count=self.behavior_cfg.default_history_fetch_count,
@@ -203,15 +258,7 @@ class PipelineAgentTasksMixin:
                 tool_result_hard_cap_tokens=self.behavior_cfg.context.tool_result_hard_cap_tokens,
                 tool_result_soft_overrides=dict(self.behavior_cfg.context.tool_result_soft_overrides),
                 activity_cb=self.mark_activity,
-                extras={
-                    "chat_timeline": self.chat_timeline,
-                    "tool_registry": sub_registry,
-                    "tool_search_approved_tools": set(),
-                    "persona_image_store": getattr(self, "persona_image_store", None),
-                    "persona_name": str(
-                        getattr(getattr(self, "persona", None), "name", "") or ""
-                    ),
-                },
+                extras=sub_extras,
             )
             output_rel = _workspace_rel(output_path, self.workspace_dir)
             manifest_rel = _workspace_rel(manifest_path, self.workspace_dir)
@@ -220,7 +267,7 @@ class PipelineAgentTasksMixin:
             async def _sub_executor(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
                 result = await sub_executor(tool_name, args)
                 if (
-                    tool_name == "write_file"
+                    tool_name in {"write_file", "agent_write"}
                     and result.get("ok", False)
                     and self._same_workspace_path(result.get("path"), output_rel)
                 ):
@@ -231,17 +278,44 @@ class PipelineAgentTasksMixin:
                     )
                 return result
 
+            if coding:
+                target_hint = (
+                    "本机 workspace（target=host）"
+                    if coding_target == "host"
+                    else "当前容器 /workspace（target=container）"
+                )
+                system_prompt = (
+                    "你是后台编码子 Agent。你只处理代码阅读、修改、搜索和命令执行任务；"
+                    "不要联系用户，不要发送消息，不要改记忆。\n"
+                    f"工作目标：{target_hint}。agent_* 工具用 target={coding_target}。\n"
+                    "先用 agent_read/agent_glob/agent_grep/agent_ls 了解现状，"
+                    "小改动用 agent_edit，大改动可用 agent_apply_patch，"
+                    "需要测试时用 agent_bash（受 workspace/沙箱限制）。\n"
+                )
+                if coding_target == "host":
+                    system_prompt += (
+                        f"最后必须把任务结论和改动摘要写入 workspace 文件：{output_rel}。\n"
+                        "写完后调用 no_action 结束。"
+                    )
+                else:
+                    system_prompt += (
+                        "最后用一条普通回复文本给出任务结论和改动摘要；"
+                        "不要向宿主 workspace 写结果文件。\n"
+                        "结束后调用 no_action。"
+                    )
+            else:
+                system_prompt = (
+                    "你是后台资料处理子 Agent。你只处理资料整理、提取、转换和分析任务，"
+                    "不要联系用户，不要发送消息，不要改记忆。\n"
+                    "你可以读取 workspace 文件、检索本地历史、读取合并转发、运行 workspace 内的 Python，"
+                    "并用 write_file 写出结果。\n"
+                    f"必须把完整结果写入 workspace 文件：{output_rel}。\n"
+                    "写完后调用 no_action 结束。"
+                )
             messages = [
                 {
                     "role": "system",
-                    "content": (
-                        "你是后台资料处理子 Agent。你只处理资料整理、提取、转换和分析任务，"
-                        "不要联系用户，不要发送消息，不要改记忆。\n"
-                        "你可以读取 workspace 文件、检索本地历史、读取合并转发、运行 workspace 内的 Python，"
-                        "并用 write_file 写出结果。\n"
-                        f"必须把完整结果写入 workspace 文件：{output_rel}。\n"
-                        "写完后调用 no_action 结束。"
-                    ),
+                    "content": system_prompt,
                 },
                 {
                     "role": "user",
@@ -259,7 +333,11 @@ class PipelineAgentTasksMixin:
                 result = await asyncio.wait_for(
                     self.chat_agent.run(
                         messages,
-                        tools=sub_registry.get_schemas(),
+                        tools=(
+                            sub_registry.get_agent_schemas(sub_session)
+                            if coding
+                            else sub_registry.get_schemas()
+                        ),
                         tool_executor=_sub_executor,
                         task_contract=f"后台资料处理任务 {task_id}",
                         max_loops=max_loops,

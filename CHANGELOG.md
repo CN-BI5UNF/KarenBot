@@ -4,7 +4,7 @@
 
 > 项目已由 Debata_Agent 更名为 KarenBot。以下历史条目保留当时的旧名称，以便追溯；上游项目仍为 [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent)。
 
-## [Unreleased]
+## [1.0.1-alpha] — 2026-11-06
 
 ### Added
 
@@ -15,9 +15,32 @@
   有界内存缓存，超出后立即丢弃最旧记录。`group_trigger_window` 的
   `open` / `extend` / `status` 新增 `history_limit`，由模型决定附带最近几条被
   过滤消息；任务上下文会提示缓存存在，但不会无条件塞入全部缓存。
+- 容器页新增 Pi / DSH / Claude Code 编码 Agent 模式：只提供原生工具语义，不启动
+  第三方 TUI/GUI/WebUI；可安装多个但只能激活一个。新增 `coding` 工具集、
+  `agent_read/write/edit/apply_patch/bash/glob/grep/ls/todo/plan/spawn/notebook_edit`
+  以及 Pi/DSH 的 `agent_tool_create/list/run/delete` 自定义工具。支持 host 本机
+  workspace 与容器 `/workspace` 两种执行位置。
+- 新增 `behavior.tool_schema_profile="agent"`：Claude Code 式常驻核心工具 +
+  `tool_search select=[...]` 延迟加载，加载状态按会话隔离。
+- 本机 Claude Code 命令执行支持 bubblewrap 沙箱（默认联网）或用户显式选择的
+  host 整机模式；容器 Agent 模式安装/激活/停用/卸载均有 WebUI 入口。
+- 详细说明见 [`docs/agent_modes.md`](docs/agent_modes.md)。
+
+### Changed
+
+- 「容器」页并行读取容器状态/存储/Agent 模式，Agent 卡片先显示加载占位；
+  `/api/container/agents` 只探测一次容器状态并并行读取三个模式 manifest。
+- 「设置 → 更新」先同步渲染占位卡片，再在后台读取 git 状态；本地 git 查询并行，
+  更新状态不再等待正在进行的联网检查/版本列表锁。
 
 ### Fixed
 
+- 存储清理删除历史图片/视频后，不再让包含这些失效引用的会话永久无法调用主模型：
+  投影时把缺失或损坏的媒体替换为明确的“不可用”文本占位，其余图片/视频
+  正常发送；畸形 metadata 和越界路径仍严格拒绝。
+- 人格状态更新 JSON 解析改为扫描并选择完整 JSON 对象，支持代码围栏、前置说明、
+  尾逗号和 reasoning_content 兜底；无法解析时记录输出长度与 finish_reason，
+  便于定位模型空输出或截断。
 - 运行器新增可选的纯文本收尾模式（仅管理员唤醒对白使用），避免不需要发送 QQ
   消息的系统轮因为“必须调用工具”的重试逻辑丢弃模型回复。
 - 工具审计修复：`start_agent_task` 在只有主模型原生视觉时也能处理图片任务；
@@ -34,6 +57,9 @@
   明确标注 `sandbox=process_only`，不再宣称是安全沙箱。风险等级调整为 high。
 - 容器工具新增一等 `delete_file` 与 `run_python`（容器内 `python3 -I`），补齐
   Cherry Studio 式容器文件操作中的删除与 Python 执行入口。
+- 编码 Agent 工具默认把本机命令限制在 bubblewrap 沙箱；`agent_apply_patch`
+  在写入前校验全部文件与上下文，失败不落盘。Pi/DSH 自定义 Python 工具和
+  `agent_spawn` 属高风险能力，UI 与文档均明确提示其权限边界。
 
 ## [1.0.1-beta] — 2026-11-04
 
