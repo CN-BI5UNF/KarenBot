@@ -149,8 +149,11 @@ Desktop 的 bind mount 必须指向 Docker 可访问的盘符路径；如果 Doc
 模型使用一个 `container` 多路复用工具：
 
 - `exec`：执行命令，返回 exit_code/stdout/stderr，超时和输出截断。
-- `read_file` / `write_file` / `edit_file` / `list_files`：只允许
-  `/workspace` 下的路径。
+- `run_python`：在容器内用 `python3 -I` 执行一段 Python 代码，返回
+  exit_code/stdout/stderr；临时脚本位于 `/workspace/.run/` 并在结束后清理。
+- `read_file` / `write_file` / `edit_file` / `list_files` / `delete_file`：
+  只允许 `/workspace` 下的路径；`delete_file` 默认只删文件，`recursive=true`
+  才会递归删除目录。
 - `import_file` / `export_file`：在宿主 AI workspace 与容器 `/workspace`
   之间传输；宿主路径也必须位于 AI workspace。
 - `reset`：删除并重建容器，保留持久卷/挂载数据。

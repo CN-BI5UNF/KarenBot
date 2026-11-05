@@ -32,6 +32,7 @@ def trigger_env():
                 group_id=123,
                 max_messages=5,
                 window_minutes=10,
+                cache_messages=25,
             )
         ],
     )
@@ -57,7 +58,12 @@ async def test_get_group_triggers_returns_rules_and_windows(trigger_env):
     assert result["ok"] is True
     assert result["enabled"] is True
     assert result["groups"] == [
-        {"group_id": 123, "max_messages": 5, "window_minutes": 10}
+        {
+            "group_id": 123,
+            "max_messages": 5,
+            "window_minutes": 10,
+            "cache_messages": 25,
+        }
     ]
     assert result["active_llm_groups"] == [123]
     assert result["active_windows"][0]["group_id"] == 123
@@ -86,8 +92,18 @@ async def test_put_group_triggers_saves_and_hot_applies(trigger_env):
     ]
     assert result["needs_restart"] is False
     assert result["groups"] == [
-        {"group_id": 456, "max_messages": 0, "window_minutes": 30},
-        {"group_id": 789, "max_messages": 12, "window_minutes": 0},
+        {
+            "group_id": 456,
+            "max_messages": 0,
+            "window_minutes": 30,
+            "cache_messages": 50,
+        },
+        {
+            "group_id": 789,
+            "max_messages": 12,
+            "window_minutes": 0,
+            "cache_messages": 50,
+        },
     ]
     assert result["hot_applied"] is True
     assert "message" in result

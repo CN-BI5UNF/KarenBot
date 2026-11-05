@@ -1001,6 +1001,12 @@ class GroupTriggerRuleConfig(StrictModel):
     window_minutes: int = Field(default=0, strict=True, ge=0, le=1440)
     """被 @ 后接收窗口最长分钟数；0 = 不按时间关闭。"""
 
+    cache_messages: int = Field(default=50, strict=True, ge=0, le=500)
+    """被过滤的普通消息最多缓存多少条；超出后立即丢弃最旧的记录。
+
+    缓存只在内存中保留，用于 LLM 打开/查询触发窗口时回看被过滤的上下文。
+    0 = 不缓存。"""
+
 
 class GroupTriggerConfig(StrictModel):
     """Per-group mention-triggered receive windows.
@@ -1606,6 +1612,10 @@ def default_tool_result_budgets() -> dict[str, ToolResultBudgetConfig]:
         "set_group_add_request": ToolResultBudgetConfig(inline_budget_tokens=400),
         "no_action": ToolResultBudgetConfig(inline_budget_tokens=256),
         "schedule_wakeup": ToolResultBudgetConfig(inline_budget_tokens=700),
+        "group_trigger_window": ToolResultBudgetConfig(
+            inline_budget_tokens=3000,
+            hard_cap_tokens=6000,
+        ),
         # 查询类
         "list_contacts": ToolResultBudgetConfig(
             inline_budget_tokens=1200,

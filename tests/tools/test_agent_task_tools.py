@@ -131,6 +131,40 @@ async def test_start_agent_task_rejects_image_ref_without_vision_service():
 
 
 @pytest.mark.asyncio
+async def test_start_agent_task_accepts_image_when_main_vision_is_available():
+    class FakeMainVision:
+        async def describe(self, image_url: str, prompt: str = ""):
+            return "主模型视觉"
+
+    calls = []
+
+    async def fake_agent_task(payload):
+        calls.append(payload)
+        return {"ok": True, "status": "completed"}
+
+    cfg = _make_config()
+    reg = build_default_registry(cfg)
+    ctx = ToolContext(
+        agent_task_cb=fake_agent_task,
+        main_vision=FakeMainVision(),
+    )
+    _approve_stub_tools(ctx, "start_agent_task")
+    executor = reg.get_executor(ctx)
+
+    result = await executor(
+        "start_agent_task",
+        {
+            "prompt": "看看这张图",
+            "sources": [{"type": "image_ref", "value": "incoming/a.png"}],
+            "output_format": "markdown",
+        },
+    )
+
+    assert result["ok"] is True
+    assert calls and calls[0]["prompt"] == "看看这张图"
+
+
+@pytest.mark.asyncio
 async def test_start_agent_task_rejects_image_workspace_path_without_vision_service():
     calls = []
 

@@ -91,12 +91,19 @@ class PipelineTaskContextMixin:
             return ""
         if not snapshot.get("active"):
             if snapshot.get("closed_after"):
-                return (
+                text = (
                     f"群聊 @ 触发窗口刚刚用完（群 {group_id}）。如果仍需接收本群"
                     f"普通消息，先 tool_search 查询参数，再调用 group_trigger_window "
                     f"action=open group_ids=[{group_id}] duration_minutes=...；最多同时临时"
                     "放行 2 个群。"
                 )
+                cached = int(snapshot.get("cached_messages") or 0)
+                if cached > 0:
+                    text += (
+                        f" 另外，本群还有 {cached} 条被过滤的近期消息在缓存中；"
+                        "调用 open/status 时可用 history_limit 指定附带条数。"
+                    )
+                return text
             return ""
         source = "LLM 临时放行" if snapshot.get("llm_owned") else "@ 触发"
         limits: list[str] = []
@@ -113,6 +120,15 @@ class PipelineTaskContextMixin:
                 "窗口即将结束；如果需要继续接收，先 tool_search 查询参数，再调用 "
                 f"group_trigger_window action=extend group_ids=[{group_id}] "
                 "duration_minutes=...。"
+            )
+        cached = int(snapshot.get("cached_messages") or 0)
+        if cached > 0:
+            cache_cap = int(snapshot.get("cache_messages") or 0)
+            cap_hint = f"（缓存上限 {cache_cap} 条）" if cache_cap > 0 else ""
+            text += (
+                f"本群另有 {cached} 条被 @ 触发过滤的近期消息保存在缓存中{cap_hint}；"
+                "需要回看时调用 group_trigger_window action=status "
+                f"group_ids=[{group_id}] history_limit=...，条数由你决定。"
             )
         text += "也可以调用 group_trigger_window action=close 提前关闭。"
         return text

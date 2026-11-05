@@ -8,6 +8,7 @@ import pytest
 
 from core.chat_timeline import ChatTimelineStore
 from tests.tools.helpers import (
+    FullFakeAdapter,
     _approve_stub_tools,
     _FakeAdapter,
     _make_config,
@@ -485,3 +486,52 @@ async def test_list_contacts_group_members_requires_group_id():
     result = await executor("list_contacts", {"scope": "group_members"})
     assert result["ok"] is False
     assert "group_id" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_set_group_add_request_removes_pending_flag():
+    class Pending:
+        def __init__(self) -> None:
+            self.removed: list[str] = []
+
+        def remove(self, flag: str) -> None:
+            self.removed.append(flag)
+
+    cfg = _make_config()
+    reg = build_default_registry(cfg)
+    pending = Pending()
+    ctx = ToolContext(
+        adapter=FullFakeAdapter(),
+        extras={"pending_requests": pending},
+    )
+    executor = reg.get_executor(ctx)
+
+    result = await executor(
+        "set_group_add_request",
+        {"flag": "flag-1", "sub_type": "add", "approve": True},
+    )
+
+    assert result["ok"] is True
+    assert pending.removed == ["flag-1"]
+
+
+@pytest.mark.asyncio
+async def test_get_forward_msg_reports_failed_status_on_expired_forward(tmp_path):
+    class ExpiredAdapter:
+        async def get_forward_msg(self, forward_id: str):
+            raise RuntimeError("消息已过期或者为内层消息")
+
+    cfg = _make_config()
+    reg = build_default_registry(cfg)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = reg.get_executor(
+        ToolContext(adapter=ExpiredAdapter(), workspace_dir=workspace)
+    )
+
+    result = await executor("get_forward_msg", {"forward_id": "old"})
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert "读取失败" in result["brief"]
+    assert result["artifact"]["path"].startswith("runtime/forwards/")

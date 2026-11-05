@@ -670,3 +670,67 @@ async def test_volume_soft_quota_blocks_before_write(tmp_path):
     with pytest.raises(ContainerError) as error:
         await service._check_before_write(1)
     assert error.value.code == "container_storage_full"
+
+
+@pytest.mark.asyncio
+async def test_delete_file_uses_guarded_rm(tmp_path):
+    docker = FakeDocker()
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        docker=docker,
+        platform_name="Linux",
+    )
+
+    async def no_start():
+        return None
+
+    service.ensure_running = no_start  # type: ignore[method-assign]
+
+    result = await service.delete_file("/workspace/a.txt", recursive=True)
+
+    assert result["ok"] is True
+    assert result["deleted"] is True
+    assert result["recursive"] is True
+    rm_call = next(call for call in docker.calls if call[:5] == ["exec", service.name, "rm", "-rf", "--"])
+    assert rm_call[-1] == "/workspace/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_delete_file_rejects_path_outside_workspace(tmp_path):
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        docker=FakeDocker(),
+        platform_name="Linux",
+    )
+
+    with pytest.raises(ContainerError) as exc_info:
+        await service.delete_file("/etc/passwd")
+
+    assert exc_info.value.code == "container_path_forbidden"
+
+
+@pytest.mark.asyncio
+async def test_run_python_writes_executes_and_cleans_script(tmp_path):
+    docker = FakeDocker()
+    service = ContainerService(
+        ContainerFeatureConfig(enabled=True, storage_mode="volume_soft"),
+        _paths(tmp_path),
+        docker=docker,
+        platform_name="Linux",
+    )
+
+    async def no_start():
+        return None
+
+    service.ensure_running = no_start  # type: ignore[method-assign]
+
+    result = await service.run_python("print(1)", timeout_seconds=5)
+
+    assert result["ok"] is True
+    assert result["sandbox"] == "container"
+    assert result["script"].startswith("/workspace/.run/inline_")
+    joined = [" ".join(call) for call in docker.calls]
+    assert any("python3 -I /workspace/.run/inline_" in line for line in joined)
+    assert any("rm -f /workspace/.run/inline_" in line for line in joined)

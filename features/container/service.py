@@ -1139,6 +1139,64 @@ class ContainerService:
         result["replaced"] = 1
         return result
 
+    async def delete_file(
+        self, path: str, *, recursive: bool = False
+    ) -> dict[str, Any]:
+        target = _validate_container_path(path)
+        await self.ensure_running()
+        command = ["exec", self.name, "rm"]
+        command.append("-rf" if recursive else "-f")
+        command.extend(["--", target])
+        result = await self._run(
+            command,
+            timeout=30.0,
+            max_output_bytes=16 * 1024,
+            raise_on_timeout=False,
+        )
+        self._touch()
+        if result.timed_out:
+            raise ContainerError("删除文件超时", code="container_timeout")
+        if result.returncode != 0:
+            raise _map_failure(result, default="container_file_delete_failed")
+        return {
+            "ok": True,
+            "path": target,
+            "recursive": bool(recursive),
+            "deleted": True,
+        }
+
+    async def run_python(
+        self,
+        code: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        """Run a Python snippet inside the container with -I (isolated) mode."""
+        text = str(code or "")
+        if not text.strip():
+            raise ContainerError("Python 代码不能为空", code="container_invalid_argument")
+        if len(text.encode("utf-8")) > _MAX_TOOL_WRITE_BYTES:
+            raise ContainerError("Python 代码超过 8 MiB", code="container_invalid_argument")
+        script_path = f"{_CONTAINER_WORKDIR}/.run/inline_{int(time.time() * 1000)}.py"
+        await self.exec(f"mkdir -p {_CONTAINER_WORKDIR}/.run", timeout_seconds=10.0)
+        await self.write_file(script_path, text)
+        try:
+            result = await self.exec(
+                f"python3 -I {script_path}",
+                timeout_seconds=timeout_seconds,
+            )
+        finally:
+            try:
+                await self.exec(
+                    f"rm -f {script_path}",
+                    timeout_seconds=10.0,
+                )
+            except Exception:  # noqa: BLE001 - cleanup must not mask result
+                logger.debug("清理容器 Python 临时脚本失败", exc_info=True)
+        result["script"] = script_path
+        result["sandbox"] = "container"
+        return result
+
     async def list_files(self, path: str = _CONTAINER_WORKDIR) -> dict[str, Any]:
         target = _validate_container_path(path, allow_root=True)
         await self.ensure_running()

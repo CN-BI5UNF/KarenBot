@@ -212,6 +212,8 @@ async def chat_selection(args: ChatSelectionArgs, ctx: ToolContext) -> dict:
         "管理用户设置的按群 @ 触发窗口。open=临时放行群消息，extend=在窗口即将"
         "结束时延长，close=提前关闭，status=查看。group_ids 每次最多 2 个；"
         "留空时默认当前群。临时放行最多同时覆盖 2 个群，时长由你决定。"
+        "open/extend/status 可用 history_limit 指定自动附带最近多少条被过滤的"
+        "群消息（按群分别计数，0=不附带）；被过滤消息只缓存在内存中。"
         "普通群消息被过滤后不会送到你这里，所以要在窗口关闭前调用 extend。"
     ),
     args_model=GroupTriggerWindowArgs,
@@ -246,6 +248,7 @@ async def group_trigger_window(
             duration_minutes=args.duration_minutes,
             reason=args.reason,
             default_group_id=default_group_id,
+            history_limit=args.history_limit,
         )
         if inspect.isawaitable(result):
             result = await result
@@ -265,6 +268,11 @@ async def group_trigger_window(
         brief = "已提前关闭指定群的接收窗口。"
     else:
         brief = "已读取群聊触发窗口状态。"
+    recent_messages = (
+        data.get("recent_messages") if isinstance(data, dict) else None
+    )
+    if recent_messages:
+        brief += f" 已附带最近 {len(recent_messages)} 条被过滤消息。"
     return {
         "ok": True,
         "status": "updated",

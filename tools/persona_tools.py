@@ -100,6 +100,11 @@ def _unavailable(tool_name: str) -> dict[str, Any]:
     }
 
 
+_PERSONA_FAILURE_STATUSES = frozenset(
+    {"disabled", "resting", "unavailable", "failed", "error"}
+)
+
+
 def _persona_result(
     result: Any,
     *,
@@ -109,6 +114,23 @@ def _persona_result(
     status = default_status
     if isinstance(result, dict) and isinstance(result.get("status"), str):
         status = result["status"]
+    if status in _PERSONA_FAILURE_STATUSES:
+        message = ""
+        if isinstance(result, dict):
+            message = str(
+                result.get("message")
+                or result.get("reason")
+                or result.get("error")
+                or ""
+            ).strip()
+        brief = message or f"人格动作未执行（{status}）。"
+        return {
+            "ok": False,
+            "status": status,
+            "brief": brief,
+            "error": brief,
+            "result": result,
+        }
     return {
         "ok": True,
         "status": status,

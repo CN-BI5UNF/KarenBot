@@ -82,7 +82,8 @@ async def save_knowledge_note(args: SaveKnowledgeNoteArgs, ctx: ToolContext) -> 
 @tool(
     name="research_web_to_prompt",
     description=(
-        "让后台小模型联网搜索并整理一个主题/热梗，自动写成知识笔记。"
+        "让后台摘要模型（未配置摘要模型时用主模型）联网搜索并整理一个主题/热梗，"
+        "自动写成知识笔记。"
         "适合需要快速了解当前热梗、新闻背景、版本信息，且不想把整页搜索结果塞进上下文的场景。"
         "会先比对已有条目，相同/相近条目不写入，并返回跳过数量。"
         "返回的是整理后的短笔记，不是原始网页；保存后可用 list_knowledge_notes 查询。"
@@ -179,6 +180,10 @@ async def delete_knowledge_note(args: DeleteKnowledgeNoteArgs, ctx: ToolContext)
         return _error("知识库未就绪")
     try:
         deleted = service.delete_entry(args.entry_id)
+    except KeyError:
+        return _error("没有这个知识条目")
+    except ValueError as exc:
+        return _error(str(exc))
     except RuntimeError as exc:
         return _error(str(exc))
     if not deleted:

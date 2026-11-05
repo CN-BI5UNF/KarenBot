@@ -166,6 +166,8 @@ export const endpoints = {
 
   mindState: () => api.get('/api/mind/state'),
   mindTab: (key, limit = 50) => api.get(`/api/mind/tab/${key}?limit=${limit}`),
+  // 唤醒对白需要一次模型调用，默认 15 秒不够。
+  wakePersona: (payload) => api.post('/api/mind/wake', payload, { timeoutMs: 120000 }),
 
   logs: (params = {}) => {
     const q = new URLSearchParams();

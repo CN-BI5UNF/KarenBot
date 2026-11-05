@@ -15,6 +15,7 @@ model-owned window), and either kind of window can be closed early.
 from __future__ import annotations
 
 import time
+from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -22,11 +23,14 @@ from typing import Any
 MAX_LLM_GROUPS = 2
 MAX_WINDOW_MINUTES = 1440
 MIN_WINDOW_MINUTES = 1
+MAX_CACHE_MESSAGES = 500
+DEFAULT_CACHE_MESSAGES = 50
 WINDOW_SOURCE_MENTION = "mention"
 WINDOW_SOURCE_LLM = "llm"
 _NEAR_MESSAGE_CAP = 2
 _NEAR_SECONDS_CAP = 300.0
 _NEAR_SECONDS_FLOOR = 60.0
+_CACHED_TEXT_LIMIT = 2000
 
 
 def _positive_ids(values: Iterable[int] | None) -> tuple[int, ...]:
@@ -41,11 +45,26 @@ def _positive_ids(values: Iterable[int] | None) -> tuple[int, ...]:
     return tuple(result)
 
 
+def _window_signature(rule: GroupTriggerRule | None) -> tuple[int, int] | None:
+    if rule is None:
+        return None
+    return rule.max_messages, rule.window_minutes
+
+
+def _history_limit(value: int | None) -> int:
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(MAX_CACHE_MESSAGES, number))
+
+
 @dataclass(frozen=True, slots=True)
 class GroupTriggerRule:
     group_id: int
     max_messages: int = 0
     window_minutes: int = 0
+    cache_messages: int = DEFAULT_CACHE_MESSAGES
 
     @property
     def has_window(self) -> bool:
@@ -93,6 +112,7 @@ class GroupTriggerManager:
         self._rules: dict[int, GroupTriggerRule] = {}
         self._windows: dict[int, TriggerWindow] = {}
         self._last_notices: dict[int, dict[str, Any]] = {}
+        self._cache: dict[int, deque[dict[str, Any]]] = {}
         self.configure(config)
 
     def configure(self, config: Any | None) -> None:
@@ -116,10 +136,28 @@ class GroupTriggerManager:
                 )
             except (TypeError, ValueError):
                 window_minutes = 0
+            try:
+                cache_messages = max(
+                    0,
+                    min(
+                        MAX_CACHE_MESSAGES,
+                        int(
+                            getattr(
+                                item,
+                                "cache_messages",
+                                DEFAULT_CACHE_MESSAGES,
+                            )
+                            or 0
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError):
+                cache_messages = DEFAULT_CACHE_MESSAGES
             rules[group_id] = GroupTriggerRule(
                 group_id=group_id,
                 max_messages=max_messages,
                 window_minutes=window_minutes,
+                cache_messages=cache_messages,
             )
         previous_rules = self._rules
         self.enabled = enabled
@@ -127,17 +165,97 @@ class GroupTriggerManager:
         if not enabled:
             self._windows.clear()
             self._last_notices.clear()
+            self._cache.clear()
             return
         for group_id in list(self._windows):
-            if group_id not in rules or rules[group_id] != previous_rules.get(
-                group_id
-            ):
+            if group_id not in rules or _window_signature(
+                rules[group_id]
+            ) != _window_signature(previous_rules.get(group_id)):
                 self._windows.pop(group_id, None)
         for group_id in list(self._last_notices):
-            if group_id not in rules or rules[group_id] != previous_rules.get(
-                group_id
-            ):
+            if group_id not in rules or _window_signature(
+                rules[group_id]
+            ) != _window_signature(previous_rules.get(group_id)):
                 self._last_notices.pop(group_id, None)
+        for group_id in list(self._cache):
+            rule = rules.get(group_id)
+            if rule is None or rule.cache_messages <= 0:
+                self._cache.pop(group_id, None)
+                continue
+            cached = self._cache[group_id]
+            while len(cached) > rule.cache_messages:
+                cached.popleft()
+
+    def record_filtered(
+        self,
+        group_id: int | str,
+        *,
+        message_id: str | None,
+        user_id: str | None,
+        nickname: str | None,
+        text: str,
+        timestamp: float | None = None,
+    ) -> bool:
+        """Keep one filtered group message in the bounded recent cache.
+
+        The record is intentionally memory-only: it is a short replay buffer for
+        ``group_trigger_window`` and is discarded when the runtime restarts or
+        the configured cap shrinks.  Returns True when the message was stored.
+        """
+        rule = self.rule(group_id)
+        if rule is None or rule.cache_messages <= 0:
+            return False
+        content = str(text or "").strip()
+        if not content:
+            return False
+        if len(content) > _CACHED_TEXT_LIMIT:
+            content = content[:_CACHED_TEXT_LIMIT]
+        gid = rule.group_id
+        cached = self._cache.setdefault(gid, deque())
+        cached.append(
+            {
+                "group_id": gid,
+                "message_id": str(message_id or ""),
+                "user_id": str(user_id or ""),
+                "nickname": str(nickname or ""),
+                "text": content,
+                "timestamp": float(timestamp if timestamp is not None else time.time()),
+            }
+        )
+        while len(cached) > rule.cache_messages:
+            cached.popleft()
+        return True
+
+    def cached_count(self, group_id: int | str) -> int:
+        rule = self.rule(group_id)
+        if rule is None:
+            return 0
+        return len(self._cache.get(rule.group_id, ()))
+
+    def cached_messages(
+        self,
+        group_ids: Iterable[int] | None,
+        *,
+        limit: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Return the newest cached records, grouped in the requested order.
+
+        ``limit`` is per group.  ``limit <= 0`` returns an empty list so callers
+        can share one option for "do not attach history".
+        """
+        try:
+            per_group = max(0, min(MAX_CACHE_MESSAGES, int(limit)))
+        except (TypeError, ValueError):
+            per_group = 0
+        if per_group <= 0:
+            return []
+        result: list[dict[str, Any]] = []
+        for gid in _positive_ids(group_ids):
+            cached = self._cache.get(gid)
+            if not cached:
+                continue
+            result.extend(dict(item) for item in list(cached)[-per_group:])
+        return result
 
     @property
     def rule_count(self) -> int:
@@ -204,6 +322,7 @@ class GroupTriggerManager:
             result["active"] = False
             result["closed_after"] = bool(notice.get("closed_after"))
             result["stale"] = True
+            result["cached_messages"] = self.cached_count(gid)
             return result
         return snapshot
 
@@ -371,6 +490,8 @@ class GroupTriggerManager:
             "reason": window.reason,
             "near_limit": bool(near),
             "llm_owned": window.source == WINDOW_SOURCE_LLM,
+            "cache_messages": rule.cache_messages if rule is not None else 0,
+            "cached_messages": self.cached_count(window.group_id),
         }
 
     @staticmethod
@@ -407,6 +528,8 @@ class GroupTriggerManager:
                 "configured": True,
                 "max_messages": rule.max_messages,
                 "window_minutes": rule.window_minutes,
+                "cache_messages": rule.cache_messages,
+                "cached_messages": self.cached_count(gid),
             }
         snapshot = self._snapshot_window(window, current) or {}
         snapshot["configured"] = True
@@ -488,6 +611,7 @@ class GroupTriggerManager:
         duration_minutes: int,
         reason: str = "",
         default_group_id: int | None = None,
+        history_limit: int = 0,
         now: float | None = None,
     ) -> dict[str, Any]:
         current = time.time() if now is None else float(now)
@@ -515,6 +639,10 @@ class GroupTriggerManager:
             "duration_minutes": duration_minutes,
             "windows": opened,
             "active_llm_groups": sorted(self.llm_owned_group_ids(now=current)),
+            "history_limit": _history_limit(history_limit),
+            "recent_messages": self.cached_messages(
+                targets, limit=history_limit
+            ),
         }
 
     def extend_llm_window(
@@ -524,6 +652,7 @@ class GroupTriggerManager:
         duration_minutes: int,
         reason: str = "",
         default_group_id: int | None = None,
+        history_limit: int = 0,
         now: float | None = None,
     ) -> dict[str, Any]:
         current = time.time() if now is None else float(now)
@@ -562,6 +691,10 @@ class GroupTriggerManager:
             "duration_minutes": duration_minutes,
             "windows": extended,
             "active_llm_groups": sorted(self.llm_owned_group_ids(now=current)),
+            "history_limit": _history_limit(history_limit),
+            "recent_messages": self.cached_messages(
+                targets, limit=history_limit
+            ),
         }
 
     def close_window(
@@ -593,6 +726,8 @@ class GroupTriggerManager:
         self,
         group_ids: Iterable[int] | None = None,
         *,
+        history_limit: int = 0,
+        default_group_id: int | None = None,
         now: float | None = None,
     ) -> dict[str, Any]:
         current = time.time() if now is None else float(now)
@@ -605,6 +740,9 @@ class GroupTriggerManager:
                     snapshots.append(item)
         else:
             snapshots = self.snapshots(now=current)
+        cache_targets = normalized
+        if not cache_targets and default_group_id is not None:
+            cache_targets = _positive_ids([default_group_id])
         return {
             "action": "status",
             "enabled": self.enabled,
@@ -613,6 +751,8 @@ class GroupTriggerManager:
                     "group_id": rule.group_id,
                     "max_messages": rule.max_messages,
                     "window_minutes": rule.window_minutes,
+                    "cache_messages": rule.cache_messages,
+                    "cached_messages": self.cached_count(rule.group_id),
                 }
                 for rule in sorted(
                     self._rules.values(), key=lambda item: item.group_id
@@ -620,6 +760,10 @@ class GroupTriggerManager:
             ],
             "windows": [item for item in snapshots if item and item.get("active")],
             "active_llm_groups": sorted(self.llm_owned_group_ids(now=current)),
+            "history_limit": _history_limit(history_limit),
+            "recent_messages": self.cached_messages(
+                cache_targets, limit=history_limit
+            ),
         }
 
     def apply_tool_action(
@@ -630,6 +774,7 @@ class GroupTriggerManager:
         duration_minutes: int = 30,
         reason: str = "",
         default_group_id: int | None = None,
+        history_limit: int = 0,
         now: float | None = None,
     ) -> dict[str, Any]:
         normalized = str(action or "").strip().lower()
@@ -639,6 +784,7 @@ class GroupTriggerManager:
                 duration_minutes=duration_minutes,
                 reason=reason,
                 default_group_id=default_group_id,
+                history_limit=history_limit,
                 now=now,
             )
         if normalized == "extend":
@@ -647,6 +793,7 @@ class GroupTriggerManager:
                 duration_minutes=duration_minutes,
                 reason=reason,
                 default_group_id=default_group_id,
+                history_limit=history_limit,
                 now=now,
             )
         if normalized == "close":
@@ -656,13 +803,20 @@ class GroupTriggerManager:
                 now=now,
             )
         if normalized == "status":
-            return self.status(group_ids, now=now)
+            return self.status(
+                group_ids,
+                history_limit=history_limit,
+                default_group_id=default_group_id,
+                now=now,
+            )
         raise ValueError("action 必须是 open、extend、close 或 status")
 
 
 __all__ = [
+    "DEFAULT_CACHE_MESSAGES",
     "GroupTriggerManager",
     "GroupTriggerRule",
+    "MAX_CACHE_MESSAGES",
     "MAX_LLM_GROUPS",
     "MAX_WINDOW_MINUTES",
     "MIN_WINDOW_MINUTES",

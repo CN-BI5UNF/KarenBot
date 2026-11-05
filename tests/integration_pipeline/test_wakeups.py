@@ -8,7 +8,9 @@ import pytest
 
 from providers.base import CompletionResult, ToolCall
 from tests.integration_pipeline.helpers import (
+    RecordingPersonaAgent,
     _ai_no_action,
+    _ai_send_private,
     _ai_tool_search,
 )
 
@@ -130,3 +132,65 @@ async def test_wakeup_turn_denies_long_running_tool_execution(build_pipeline):
     assert denied_records
 
     assert denied_records[-1]["status"] == "denied"
+
+@pytest.mark.asyncio
+async def test_admin_wake_turn_returns_webui_reply_and_records_system_note(
+    build_pipeline,
+):
+    persona_agent = RecordingPersonaAgent()
+    pipeline, provider, adapter, history, _ = await build_pipeline(
+        [CompletionResult(content="唔……我醒了，怎么了？", finish_reason="stop")],
+        persona_agent=persona_agent,
+    )
+
+    reply = await pipeline.run_admin_wake_turn(
+        admin_message="醒醒，有事找你",
+        reason="admin_webui",
+    )
+
+    assert reply == "唔……我醒了，怎么了？"
+    assert adapter.sent == []
+    assert len(provider.calls) == 1
+    messages = provider.calls[0]["messages"]
+    assert messages[-1]["role"] == "user"
+    assert "管理员在 WebUI 点击了“唤醒”" in messages[-1]["content"]
+    assert "醒醒，有事找你" in messages[-1]["content"]
+    records = await history.records()
+    assert any(
+        record.get("role") == "system"
+        and "管理员从 WebUI 将你唤醒" in str(record.get("content") or "")
+        for record in records
+    )
+
+
+@pytest.mark.asyncio
+async def test_admin_wake_turn_denies_outbound_qq_tools(build_pipeline):
+    persona_agent = RecordingPersonaAgent()
+    pipeline, _, adapter, _, _ = await build_pipeline(
+        [
+            _ai_send_private(target_qq="123", content="不应发出的消息"),
+            CompletionResult(content="我醒了。", finish_reason="stop"),
+        ],
+        persona_agent=persona_agent,
+    )
+
+    reply = await pipeline.run_admin_wake_turn(admin_message="醒醒")
+
+    assert reply == "我醒了。"
+    assert adapter.sent == []
+
+
+@pytest.mark.asyncio
+async def test_admin_wake_turn_uses_fallback_when_model_does_not_reply(
+    build_pipeline,
+):
+    persona_agent = RecordingPersonaAgent()
+    pipeline, _, adapter, _, _ = await build_pipeline(
+        [_ai_no_action()],
+        persona_agent=persona_agent,
+    )
+
+    reply = await pipeline.run_admin_wake_turn()
+
+    assert reply == "唔……我醒了。怎么了？"
+    assert adapter.sent == []

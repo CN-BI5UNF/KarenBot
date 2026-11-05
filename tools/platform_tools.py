@@ -325,14 +325,20 @@ async def get_forward_msg(args: GetForwardMsgArgs, ctx: ToolContext) -> dict:
     )
     summary = summarize_forward_tree(tree)
     rel_path = relative_to_workspace(path, ctx.workspace_dir)
+    failed = tree.get("status") != "ok"
     result = {
-        "ok": tree.get("status") == "ok",
-        "status": "artifact",
+        "ok": not failed,
+        "status": "failed" if failed else "artifact",
         "brief": (
-            f"已提取合并转发 {args.forward_id}："
-            f"消息 {summary['message_count']} 条，"
-            f"嵌套 {summary['nested_forward_count']} 个，"
-            f"图片/表情 {summary['image_count']} 个；完整结构已写入 {rel_path}。"
+            f"合并转发 {args.forward_id} 读取失败："
+            f"{tree.get('error') or '未知错误'}；已保留可读的部分结构 {rel_path}。"
+            if failed
+            else (
+                f"已提取合并转发 {args.forward_id}："
+                f"消息 {summary['message_count']} 条，"
+                f"嵌套 {summary['nested_forward_count']} 个，"
+                f"图片/表情 {summary['image_count']} 个；完整结构已写入 {rel_path}。"
+            )
         ),
         "artifact": {
             "path": rel_path,
@@ -620,6 +626,7 @@ async def set_group_add_request(args: SetGroupRequestArgs, ctx: ToolContext) -> 
             "brief": f"处理群请求失败：{e}",
             "error": str(e),
         }
+    _remove_pending_request(ctx, args.flag)
     action = "同意" if args.approve else "拒绝"
     return {
         "ok": True,

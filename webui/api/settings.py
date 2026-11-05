@@ -828,6 +828,7 @@ def _group_trigger_json(rt: Any) -> dict[str, Any]:
                 "group_id": int(rule.group_id),
                 "max_messages": int(rule.max_messages),
                 "window_minutes": int(rule.window_minutes),
+                "cache_messages": int(rule.cache_messages),
             }
             for rule in cfg.groups
         ],
@@ -860,6 +861,7 @@ async def put_group_triggers(
             group_id=rule.group_id,
             max_messages=rule.max_messages,
             window_minutes=rule.window_minutes,
+            cache_messages=rule.cache_messages,
         )
         for rule in payload.groups
     ]

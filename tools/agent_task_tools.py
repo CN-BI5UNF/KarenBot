@@ -69,7 +69,7 @@ async def start_agent_task(args: StartAgentTaskArgs, ctx: ToolContext) -> dict:
     if ctx.agent_task_cb is None:
         return {"ok": False, "error": "当前运行时不支持后台子 Agent 任务"}
     vision_unavailable_reason = ""
-    if ctx.vision is None:
+    if ctx.vision is None and ctx.main_vision is None:
         vision_unavailable_reason = "当前没有可用图片理解能力"
     elif ctx.extras.get("vision_unavailable_this_turn"):
         vision_unavailable_reason = str(ctx.extras["vision_unavailable_this_turn"])

@@ -31,7 +31,8 @@ def _service(ctx: ToolContext) -> Any:
     description=(
         "在 Karen 的受控 Docker 容器里运行命令和读写 /workspace 文件。"
         "action=exec 执行命令并返回 stdout/stderr/exit_code；"
-        "read_file/write_file/edit_file/list_files 操作 /workspace；"
+        "action=run_python 在容器内用 python3 -I 执行代码；"
+        "read_file/write_file/edit_file/list_files/delete_file 操作 /workspace；"
         "import_file/export_file 在宿主 AI workspace 与容器之间传输；"
         "status/storage 查看状态；reset 只重建容器，不删除持久数据。"
         "容器默认无网络、无特权、非 root，资源有限。"
@@ -59,6 +60,14 @@ async def container(args: ContainerArgs, ctx: ToolContext) -> dict[str, Any]:
             return await service.exec(
                 args.command, timeout_seconds=args.timeout_seconds
             )
+        if action == "run_python":
+            if not args.code.strip():
+                raise ContainerError(
+                    "run_python 需要 code", code="container_invalid_argument"
+                )
+            return await service.run_python(
+                args.code, timeout_seconds=args.timeout_seconds
+            )
         if action == "read_file":
             if not args.path.strip():
                 raise ContainerError(
@@ -79,6 +88,12 @@ async def container(args: ContainerArgs, ctx: ToolContext) -> dict[str, Any]:
             return await service.edit_file(args.path, args.old, args.new)
         if action == "list_files":
             return await service.list_files(args.path or "/workspace")
+        if action == "delete_file":
+            if not args.path.strip():
+                raise ContainerError(
+                    "delete_file 需要 path", code="container_invalid_argument"
+                )
+            return await service.delete_file(args.path, recursive=args.recursive)
         if action == "import_file":
             if not args.host_path.strip() or not args.container_path.strip():
                 raise ContainerError(

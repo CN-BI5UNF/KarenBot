@@ -76,6 +76,7 @@ class ChatAgent:
         provider_limit_bytes: int | None = None,
         prompt_budget_tokens: int | None = None,
         token_estimator: Any = None,
+        accept_plain_text: bool = False,
     ) -> AgentRunResult:
         """执行一次完整对话循环（直到工具调用收尾）。
 
@@ -107,4 +108,5 @@ class ChatAgent:
             provider_limit_bytes=provider_limit_bytes,
             prompt_budget_tokens=prompt_budget_tokens,
             token_estimator=token_estimator,
+            accept_plain_text=accept_plain_text,
         )

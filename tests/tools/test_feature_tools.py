@@ -549,6 +549,54 @@ async def test_web_search_condenses_long_results():
 
 
 @pytest.mark.asyncio
+async def test_web_search_failure_string_is_not_ok():
+    class FailingSearch:
+        async def search(self, query: str) -> str:
+            return "（免费搜索失败：network down）"
+
+    cfg = _make_config(web_search_enabled=True)
+    reg = build_default_registry(cfg)
+    executor = reg.get_executor(ToolContext(web_search=FailingSearch()))
+    result = await executor("web_search", {"query": "测试"})
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert "network down" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_weather_failure_string_is_not_ok():
+    class FailingWeather:
+        async def query(self, city: str, days: int = 1) -> str:
+            return "地理编码失败：ConnectError: network down"
+
+    cfg = _make_config(weather_enabled=True)
+    reg = build_default_registry(cfg)
+    executor = reg.get_executor(ToolContext(weather=FailingWeather()))
+    result = await executor("get_weather", {"city": "北京"})
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert "ConnectError" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_weather_partial_forecast_failure_keeps_realtime_ok():
+    class PartialWeather:
+        async def query(self, city: str, days: int = 1) -> str:
+            return "北京 实时：晴，20°C\n（预报查询失败：timeout）"
+
+    cfg = _make_config(weather_enabled=True)
+    reg = build_default_registry(cfg)
+    executor = reg.get_executor(ToolContext(weather=PartialWeather()))
+    result = await executor("get_weather", {"city": "北京", "days": 3})
+
+    assert result["ok"] is True
+    assert "warning" in result
+    assert "预报" in result["warning"]
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_without_service():
     cfg = _make_config(web_search_enabled=True)
     reg = build_default_registry(cfg)

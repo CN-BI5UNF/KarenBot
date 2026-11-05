@@ -4,6 +4,37 @@
 
 > 项目已由 Debata_Agent 更名为 KarenBot。以下历史条目保留当时的旧名称，以便追溯；上游项目仍为 [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent)。
 
+## [Unreleased]
+
+### Added
+
+- 人格后台新增「唤醒」：睡眠/昏睡中的人格可由管理员叫醒，并可留一句叫醒的话；
+  唤醒后跑一轮受控对白，回复只显示在 WebUI，不会自动发送到 QQ。该轮禁用发送、
+  撤回、戳一戳和定时发送等出站工具；`POST /api/mind/wake` 为对应接口。
+- 群聊 @ 触发新增每群「过滤缓存条数」（0-500，默认 50）：被过滤的普通消息进入
+  有界内存缓存，超出后立即丢弃最旧记录。`group_trigger_window` 的
+  `open` / `extend` / `status` 新增 `history_limit`，由模型决定附带最近几条被
+  过滤消息；任务上下文会提示缓存存在，但不会无条件塞入全部缓存。
+
+### Fixed
+
+- 运行器新增可选的纯文本收尾模式（仅管理员唤醒对白使用），避免不需要发送 QQ
+  消息的系统轮因为“必须调用工具”的重试逻辑丢弃模型回复。
+- 工具审计修复：`start_agent_task` 在只有主模型原生视觉时也能处理图片任务；
+  `web_search` / `get_weather` 不再把服务错误字符串包装成 `ok=true`；发送工具在
+  空目标或所有目标均无效时返回 `ok=false`；`eat` / `sleep` / `work` 在人格模式
+  未启用或正在休息时不再虚报成功；`set_group_add_request` 成功后清除待处理
+  标记；`delete_knowledge_note` 对不存在/无权条目返回干净错误；
+  `get_forward_msg` 读取失败时状态改为 `failed`。
+
+### Security
+
+- `run_python` 优先使用 bubblewrap：只读挂载系统目录与 venv、workspace 可写、
+  隔离网络/PID/IPC 并清空环境变量；没有 `bwrap` 时退回普通子进程并在结果中
+  明确标注 `sandbox=process_only`，不再宣称是安全沙箱。风险等级调整为 high。
+- 容器工具新增一等 `delete_file` 与 `run_python`（容器内 `python3 -I`），补齐
+  Cherry Studio 式容器文件操作中的删除与 Python 执行入口。
+
 ## [1.0.1-beta] — 2026-11-04
 
 ### Fixed

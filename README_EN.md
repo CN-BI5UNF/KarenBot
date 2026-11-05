@@ -30,7 +30,7 @@ The project is named **KarenBot** after **Karen**, Plankton's robot girlfriend i
 
 ## Features
 
-- Persona prompts, dynamic state, relationships, and per-persona memory.
+- Persona prompts, dynamic state, relationships, and per-persona memory. The persona backend can wake a sleeping/collapsed persona with a WebUI-only "wake-up" line.
 - QQ / NapCat integration (private and group chats, send queue).
 - Long-term memory and archival without rewriting raw history.
 - Multi-turn tool loop: messaging, recall, memory, search, weather, wake-ups, sub-agents.
@@ -41,7 +41,7 @@ The project is named **KarenBot** after **Karen**, Plankton's robot girlfriend i
 - Native vision paths for images, complete animated GIFs, and complete videos where the selected main model supports them; standalone vision remains available. Videos are sent as managed data URLs without frame extraction; unsupported models receive a workspace placeholder only.
 - On-demand knowledge and group-slang lookup; knowledge supports per-entry sharing, while slang is shared by every persona in the same group. The slang page supports search; AI applications whose term duplicates an existing group entry are auto-rejected and kept visible instead of overwriting it.
 - **Chat selection**: the model can temporarily pause ordinary group messages or accept only selected groups. @-mentions still arrive, and private chats are never filtered.
-- **Per-group @ triggers**: choose groups that only respond after an @ mention and set a message-count and/or duration window. The model can call `group_trigger_window` to open, extend, or close transient windows, with at most two LLM-opened groups at once.
+- **Per-group @ triggers**: choose groups that only respond after an @ mention and set a message-count and/or duration window plus a per-group memory cap for filtered messages. The model can call `group_trigger_window` to open, extend, or close transient windows and use `history_limit` to include the latest filtered messages, with at most two LLM-opened groups at once.
 - **Two-layer tool routing (experimental)**: `behavior.tool_schema_profile="routed"` exposes core tools plus `list_toolsets` / `load_toolset`; loaded toolsets use compact schemas and `tool_search` remains the per-tool detail layer. State is per conversation, and the default profile stays `compact`.
 - **Storage & data**: one page for storage inventory/cache cleanup, context budget, previewed persona runtime cleanup, and local source uninstall, with optional external backup and an independent uninstall helper.
 - LLM-managed emoji folder tools plus native QQ face adaptation: inbound faces show Chinese names (e.g. `[流眼泪]` for `[表情5]`) and send tools accept face names.

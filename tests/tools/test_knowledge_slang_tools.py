@@ -6,11 +6,13 @@ import pytest
 
 from tools import ToolContext
 from tools.knowledge_tools import (
+    delete_knowledge_note,
     list_knowledge_notes,
     research_web_to_prompt,
     save_knowledge_note,
 )
 from tools.schemas import (
+    DeleteKnowledgeNoteArgs,
     ListKnowledgeArgs,
     LookupSlangArgs,
     ResearchWebToPromptArgs,
@@ -172,3 +174,28 @@ async def test_research_tool_reports_skipped_duplicates():
     assert result["saved"] == 1
     assert result["duplicates"] == 2
     assert "跳过 2 条重复" in result["brief"]
+
+
+@pytest.mark.asyncio
+async def test_delete_knowledge_note_handles_missing_and_forbidden_entries():
+    class MissingKnowledge:
+        def delete_entry(self, entry_id):
+            raise KeyError(entry_id)
+
+    missing = await delete_knowledge_note(
+        DeleteKnowledgeNoteArgs(entry_id="missing123"),
+        ToolContext(knowledge_service=MissingKnowledge()),
+    )
+    assert missing["ok"] is False
+    assert "没有这个知识条目" in missing["error"]
+
+    class ForbiddenKnowledge:
+        def delete_entry(self, entry_id):
+            raise ValueError("只能删除当前人格的知识条目")
+
+    forbidden = await delete_knowledge_note(
+        DeleteKnowledgeNoteArgs(entry_id="shared1234"),
+        ToolContext(knowledge_service=ForbiddenKnowledge()),
+    )
+    assert forbidden["ok"] is False
+    assert "当前人格" in forbidden["error"]

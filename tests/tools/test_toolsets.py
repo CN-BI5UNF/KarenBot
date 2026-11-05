@@ -128,7 +128,7 @@ def test_routed_risk_hints_cover_dangerous_tools():
     """路由模式不能把高风险/中风险工具降成 low。"""
     reg = _registry("routed")
     assert reg.get_spec("set_group_ban").risk_level == "high"
-    assert reg.get_spec("run_python").risk_level == "medium"
+    assert reg.get_spec("run_python").risk_level == "high"
     assert reg.get_spec("delete_file").risk_level == "medium"
 
 

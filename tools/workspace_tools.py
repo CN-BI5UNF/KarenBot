@@ -4,12 +4,13 @@
     - 路径必须 resolve 后在 workspace 下
     - workspace_dir=None 时全部禁用
 
-run_python 用 subprocess.run 跑 Python 解释器（venv 的）：
+run_python 用子进程跑 Python 解释器（venv 的）：
     - cwd 锁死在 workspace 目录
-    - 通过路径检查 + Python sys.path 限制阻止访问 workspace 外（best-effort，
-      Python 本身无法 100% 沙箱化，所以默认信任 AI 不会构造逃逸路径，
-      但工具循环里 LLM 想做坏事很难——它只能写 workspace 内的代码）
-    - 超时 + stdout/stderr 截断 + 不继承父进程环境敏感变量
+    - 优先使用 bubblewrap（bwrap）：只读挂载系统目录与 venv，workspace 可写，
+      隔离 PID/IPC/UTS/cgroup/网络，并清空环境变量；
+    - 没有 bwrap 时退回普通子进程：cwd + 精简环境变量，只是进程级隔离，
+      不是安全沙箱；结果里会明确标注 sandbox=process_only
+    - 超时 + stdout/stderr 截断
 """
 
 from __future__ import annotations
@@ -17,7 +18,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
+import shutil
 import sys
 import time
 import zipfile
@@ -586,14 +589,132 @@ async def delete_file(args: DeleteFileArgs, ctx: ToolContext) -> dict:
     }
 
 
+_PYTHON_SANDBOX_BIN = "bwrap"
+
+_SAFE_PYTHON_ENV_KEYS = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TZ",
+)
+
+
+def _python_subprocess_env(ws_root: Path, tmp_dir: Path) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for key in _SAFE_PYTHON_ENV_KEYS:
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    env.setdefault("LANG", "C.UTF-8")
+    env["HOME"] = str(ws_root)
+    env["TMPDIR"] = str(tmp_dir)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
+    return env
+
+
+def _bwrap_ro_binds() -> list[Path]:
+    """Return the system/venv roots that bubblewrap should expose read-only."""
+    candidates: list[Path] = [
+        Path("/usr"),
+        Path("/bin"),
+        Path("/sbin"),
+        Path("/lib"),
+        Path("/lib64"),
+        Path("/etc"),
+        Path(sys.prefix),
+        Path(sys.base_prefix),
+    ]
+    bound: list[Path] = []
+    for candidate in candidates:
+        try:
+            if candidate.is_symlink() or not candidate.exists():
+                # /lib and /lib64 are usually symlinks into /usr; binding both
+                # creates duplicate mount points inside the sandbox.
+                continue
+            resolved = candidate.resolve(strict=True)
+        except OSError:
+            continue
+        if any(resolved == root or resolved.is_relative_to(root) for root in bound):
+            continue
+        if any(root.is_relative_to(resolved) for root in bound):
+            continue
+        bound.append(resolved)
+    return bound
+
+
+def _bwrap_usr_symlinks() -> list[tuple[str, str]]:
+    """Recreate merged-usr links such as /lib -> usr/lib inside the sandbox."""
+    result: list[tuple[str, str]] = []
+    for link in ("/bin", "/sbin", "/lib", "/lib64"):
+        path = Path(link)
+        if not path.is_symlink():
+            continue
+        try:
+            target = os.readlink(path)
+        except OSError:
+            continue
+        result.append((target.lstrip("/"), link))
+    return result
+
+
+def _bwrap_command(
+    bwrap: str,
+    script: Path,
+    ws_root: Path,
+    env: dict[str, str],
+) -> list[str]:
+    args = [
+        bwrap,
+        "--die-with-parent",
+        "--new-session",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
+        "--unshare-cgroup",
+        "--unshare-net",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        "--tmpfs",
+        "/tmp",
+    ]
+    for target, link in _bwrap_usr_symlinks():
+        args.extend(["--symlink", target, link])
+    for root in _bwrap_ro_binds():
+        args.extend(["--ro-bind", str(root), str(root)])
+    args.extend(
+        [
+            "--bind",
+            str(ws_root),
+            str(ws_root),
+            "--chdir",
+            str(ws_root),
+            "--clearenv",
+        ]
+    )
+    for key, value in env.items():
+        args.extend(["--setenv", key, value])
+    args.extend([sys.executable, str(script)])
+    return args
+
+
 @tool(
     name="run_python",
     description=(
-        "在 workspace 目录里执行一段 Python 代码（subprocess + 当前 venv）。"
-        "cwd 锁死在 workspace。可以读写 workspace 内任何文件、用任意标准库 + 已装第三方库。"
+        "在 workspace 目录里执行一段 Python 代码（当前 venv）。"
+        "优先使用 bubblewrap 沙箱：只读挂载系统目录和 venv，workspace 可写，"
+        "隔离网络/PID/IPC 并清空环境变量；系统没有 bwrap 时退回普通子进程，"
+        "此时只有 cwd + 精简环境变量，不是安全沙箱。"
+        "可以读写 workspace 内任何文件、用任意标准库 + 已装第三方库。"
         "适合计算、生成小文件、验证脚本或处理用户上传到 workspace 的文件。"
-        "**不能**访问 workspace 外的文件（路径检查由代码本身配合 + 调用方约束）。"
-        "默认超时 30 秒。返回 stdout / stderr / returncode。"
+        "默认超时 30 秒。返回 stdout / stderr / returncode 和 sandbox 标记。"
     ),
     args_model=RunPythonArgs,
     category="workspace",
@@ -611,14 +732,14 @@ async def run_python(args: RunPythonArgs, ctx: ToolContext) -> dict:
     # 把代码先写到 workspace/.run/_inline_{ts}.py 然后跑（让 traceback 路径可读）
     run_dir = ws_root / ".run"
     run_dir.mkdir(exist_ok=True)
+    tmp_dir = run_dir / "tmp"
+    tmp_dir.mkdir(exist_ok=True)
     script = run_dir / f"_inline_{int(time.time() * 1000)}.py"
 
-    # 在 AI 代码前插入路径守卫：把 os.chdir / open / Path.open 等容易越界的入口
-    # 限制在 workspace 下。这是 best-effort——Python 本身无法 100% 沙箱化。
     guard = (
-        f"import os, sys\n"
+        "import os, sys\n"
         f"os.chdir({str(ws_root)!r})\n"
-        f"# AI 代码从这里开始\n"
+        "# AI 代码从这里开始\n"
     )
     try:
         await asyncio.to_thread(script.write_text, guard + args.code, encoding="utf-8")
@@ -626,11 +747,21 @@ async def run_python(args: RunPythonArgs, ctx: ToolContext) -> dict:
         error = f"无法写入临时脚本：{e}"
         return {"ok": False, "status": "failed", "brief": error, "error": error}
 
+    env = _python_subprocess_env(ws_root, tmp_dir)
+    bwrap = shutil.which(_PYTHON_SANDBOX_BIN)
+    sandbox = "bubblewrap" if bwrap else "process_only"
+    if bwrap:
+        command = _bwrap_command(bwrap, script, ws_root, env)
+        process_env = None
+    else:
+        command = [sys.executable, str(script)]
+        process_env = env
+
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(script),
+            *command,
             cwd=str(ws_root),
+            env=process_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -650,6 +781,7 @@ async def run_python(args: RunPythonArgs, ctx: ToolContext) -> dict:
                 "brief": f"Python 执行超时（{args.timeout_seconds} 秒）。",
                 "error": f"超时（{args.timeout_seconds} 秒）",
                 "timeout": True,
+                "sandbox": sandbox,
             }
         returncode = proc.returncode if proc.returncode is not None else -1
     except Exception as e:  # noqa: BLE001
@@ -660,6 +792,17 @@ async def run_python(args: RunPythonArgs, ctx: ToolContext) -> dict:
             script.unlink()
         except OSError:
             pass
+
+    stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+    if sandbox == "bubblewrap" and returncode != 0 and stderr_text.startswith("bwrap:"):
+        error = f"bubblewrap 沙箱启动失败：{stderr_text.strip()}"
+        return {
+            "ok": False,
+            "status": "failed",
+            "brief": error,
+            "error": error,
+            "sandbox": sandbox,
+        }
 
     stdout = stdout_bytes.decode("utf-8", errors="replace")
     stderr = stderr_bytes.decode("utf-8", errors="replace")
@@ -673,13 +816,20 @@ async def run_python(args: RunPythonArgs, ctx: ToolContext) -> dict:
         "returncode": returncode,
         "stdout": stdout,
         "stderr": stderr,
+        "sandbox": sandbox,
         "data": {
             "returncode": returncode,
             "stdout_bytes": stdout_bytes_len,
             "stderr_bytes": stderr_bytes_len,
             "timeout_seconds": args.timeout_seconds,
+            "sandbox": sandbox,
         },
     }
+    if sandbox == "process_only":
+        result["warning"] = (
+            "系统未安装 bubblewrap，run_python 只做了 cwd 与精简环境变量隔离，"
+            "不是安全沙箱。"
+        )
     budget = tool_budget("run_python", ctx)
     estimator = TokenEstimator()
     if _estimate_result(result, estimator) <= budget.inline:

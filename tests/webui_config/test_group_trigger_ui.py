@@ -20,6 +20,9 @@ def test_group_trigger_nav_page_and_api_are_wired():
     assert "endpoints.saveGroupTriggers" in page
     assert "最多连续消息数" in page
     assert "时间窗口" in page
+    assert "过滤缓存条数" in page
+    assert "cache_messages" in page
+    assert "history_limit" in page
     assert "group_trigger_window" in page
     assert "最多同时覆盖 2 个群" in page
     assert "groupTriggers:" in api

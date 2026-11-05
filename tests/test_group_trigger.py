@@ -163,6 +163,9 @@ async def test_pipeline_filters_plain_messages_until_mention_window(build_pipeli
     await pipeline.enqueue(_msg(group_id="5555", text="普通消息 1", message_id="gt-1"))
     await _drain_pipeline(pipeline)
     assert provider.calls == []
+    manager = pipeline.group_trigger
+    assert manager.cached_count(5555) == 1
+    assert manager.cached_messages([5555], limit=5)[0]["text"] == "普通消息 1"
 
     await pipeline.enqueue(_msg(group_id="5555", text="@我 在吗", message_id="gt-2"))
     await _drain_pipeline(pipeline)
@@ -183,6 +186,9 @@ async def test_pipeline_filters_plain_messages_until_mention_window(build_pipeli
     assert not any("普通消息 4" in str(record.get("content") or "") for record in records)
 
     manager = pipeline.group_trigger
+    assert [
+        item["text"] for item in manager.cached_messages([5555], limit=10)
+    ] == ["普通消息 1", "普通消息 4"]
     assert manager.llm_owned_group_ids() == set()
     assert MAX_LLM_GROUPS == 2
 
@@ -205,3 +211,114 @@ def test_expired_llm_windows_release_capacity():
     assert manager.llm_owned_group_ids(now=2000.0) == set()
     reopened = manager.open_llm_window([3], duration_minutes=1, now=2000.0)
     assert reopened["active_llm_groups"] == [3]
+
+
+def _cache_config(group_id: int, cache_messages: int) -> GroupTriggerConfig:
+    return GroupTriggerConfig(
+        enabled=True,
+        groups=[
+            GroupTriggerRuleConfig(
+                group_id=group_id,
+                cache_messages=cache_messages,
+            )
+        ],
+    )
+
+
+def _record(manager: GroupTriggerManager, group_id: int, text: str, now: float) -> None:
+    allowed = manager.on_inbound(group_id, False, now=now).allowed
+    assert allowed is False
+    manager.record_filtered(
+        group_id,
+        message_id=f"m-{text}",
+        user_id="42",
+        nickname="群友",
+        text=text,
+        timestamp=now,
+    )
+
+
+def test_filtered_messages_are_cached_and_evicted_at_cap():
+    manager = GroupTriggerManager(_cache_config(5555, 2))
+    _record(manager, 5555, "第一条", 1000.0)
+    _record(manager, 5555, "第二条", 1001.0)
+    _record(manager, 5555, "第三条", 1002.0)
+
+    cached = manager.cached_messages([5555], limit=10)
+    assert [item["text"] for item in cached] == ["第二条", "第三条"]
+    assert manager.cached_count(5555) == 2
+    assert manager.snapshot(5555, now=1003.0)["cached_messages"] == 2
+
+
+def test_cache_zero_disables_storage_and_config_shrink_trims():
+    manager = GroupTriggerManager(_cache_config(5555, 2))
+    _record(manager, 5555, "一", 1000.0)
+    _record(manager, 5555, "二", 1001.0)
+
+    manager.configure(_cache_config(5555, 1))
+    assert [item["text"] for item in manager.cached_messages([5555], limit=10)] == ["二"]
+
+    manager.configure(_cache_config(5555, 0))
+    assert manager.cached_count(5555) == 0
+    allowed = manager.on_inbound(5555, False, now=1002.0).allowed
+    assert allowed is False
+    assert manager.record_filtered(
+        5555,
+        message_id="m-三",
+        user_id="42",
+        nickname="群友",
+        text="三",
+        timestamp=1002.0,
+    ) is False
+
+
+def test_open_and_status_attach_llm_selected_history_limit():
+    manager = GroupTriggerManager(_cache_config(5555, 50))
+    for index in range(5):
+        _record(manager, 5555, f"消息 {index}", 1000.0 + index)
+
+    opened = manager.open_llm_window(
+        [5555],
+        duration_minutes=10,
+        history_limit=2,
+        now=1010.0,
+    )
+    assert opened["history_limit"] == 2
+    assert [item["text"] for item in opened["recent_messages"]] == [
+        "消息 3",
+        "消息 4",
+    ]
+
+    status = manager.status([5555], history_limit=1, now=1011.0)
+    assert [item["text"] for item in status["recent_messages"]] == ["消息 4"]
+    assert status["rules"][0]["cache_messages"] == 50
+    assert status["rules"][0]["cached_messages"] == 5
+
+    no_history = manager.open_llm_window(
+        [5555],
+        duration_minutes=10,
+        history_limit=0,
+        now=1012.0,
+    )
+    assert no_history["recent_messages"] == []
+
+
+def test_tool_attaches_history_and_reports_count():
+    manager = GroupTriggerManager(_cache_config(5555, 50))
+    _record(manager, 5555, "被过滤的旧消息", 1000.0)
+    args = GroupTriggerWindowArgs(
+        action="open",
+        duration_minutes=7,
+        history_limit=10,
+    )
+    ctx = ToolContext(
+        group_trigger_cb=manager.apply_tool_action,
+        extras={"current_group_id": 5555},
+    )
+
+    import asyncio
+
+    result = asyncio.run(group_trigger_window(args, ctx))
+    assert result["ok"] is True
+    assert result["result"]["recent_messages"][0]["text"] == "被过滤的旧消息"
+    assert "1 条被过滤消息" in result["brief"]

@@ -1,7 +1,7 @@
 // 人格后台页 —— 对应 ui/dashboard/persona_mind_page.py。
 // 顶部是实时状态快照，下面 6+ 个只读标签页展示人格数据库里的轨迹。
 
-import { h, fill, card, empty, statCard, formatTime } from '../dom.js';
+import { h, fill, card, empty, statCard, formatTime, modal, field } from '../dom.js';
 import { endpoints } from '../api.js';
 
 // 标签名必须与后端/提示词用词一致：effects=短期影响、cues=线索、todos=待办。
@@ -28,15 +28,27 @@ export async function render(container, ctx) {
   let disposed = false;
 
   const stateCards = h('div', { class: 'grid grid-4' });
+  const wakeResultHost = h('div', {});
   const tabBody = h('div', {});
   const tabBar = h('div', { class: 'tabs' });
+  let wakeBtn = null;
+  let wakeBusy = false;
 
   function renderState(data) {
     if (!data.available) {
+      if (wakeBtn) {
+        wakeBtn.disabled = true;
+        wakeBtn.title = data.reason || '人格后台不可用';
+      }
       fill(stateCards, card('人格后台未启用', '', h('div', { class: 'field-help' }, data.reason || '')));
       return;
     }
     const s = data.state || {};
+    if (wakeBtn) {
+      const sleeping = s.current_action === 'sleeping' || s.current_action === 'collapsing';
+      wakeBtn.disabled = wakeBusy || !sleeping;
+      wakeBtn.title = sleeping ? '像被人叫醒一样唤醒人格' : '只有睡眠/昏睡中的人格才能被唤醒';
+    }
     const phys = data.physiology || {};
     const actionLabels = {
       awake: '清醒',
@@ -86,6 +98,67 @@ export async function render(container, ctx) {
     );
   }
 
+  function showWakeResult(data) {
+    if (data.reply_error) {
+      fill(wakeResultHost, card('唤醒对话', '',
+        empty(`人格已经醒了，但生成对白失败（${data.reply_error}）。`)));
+      return;
+    }
+    const reply = String(data.reply || '').trim();
+    fill(wakeResultHost, card('唤醒对话',
+      '只显示在人格后台，不会自动发送到 QQ。',
+      h('div', { class: 'wake-reply' }, reply || '（没有生成对白）'),
+    ));
+  }
+
+  function openWakeModal() {
+    if (wakeBusy) return;
+    const message = h('textarea', {
+      rows: 3,
+      maxlength: 2000,
+      placeholder: '例如：醒醒，群里有人找你 / 起来看看这个消息',
+    });
+    const submit = h('button', { class: 'btn btn-primary' }, '叫醒');
+    const dialog = modal({
+      title: '唤醒人格',
+      subtitle: '像被人叫醒一样，人格会回一句自然的话。',
+      body: h('div', {},
+        field('叫醒留言（可选）', message,
+          '会作为“叫醒你的人说的话”交给模型；留空时只表示把人格叫醒。'),
+        h('p', { class: 'field-help' },
+          '唤醒后需要一次模型调用；回复只显示在这里，不会自动发到 QQ。'),
+      ),
+      footer: h('div', { class: 'row' },
+        h('button', { class: 'btn', onclick: () => dialog.close() }, '取消'),
+        submit,
+      ),
+    });
+    submit.onclick = async () => {
+      if (wakeBusy) return;
+      wakeBusy = true;
+      submit.disabled = true;
+      submit.textContent = '正在叫醒…';
+      try {
+        const data = await endpoints.wakePersona({
+          message: message.value.trim(),
+          reason: 'admin_webui',
+        });
+        dialog.close();
+        showWakeResult(data || {});
+        ctx.toast('已唤醒人格', 'ok');
+        await refresh();
+      } catch (e) {
+        ctx.toast(e.message, 'error');
+      } finally {
+        wakeBusy = false;
+        submit.disabled = false;
+        submit.textContent = '叫醒';
+      }
+    };
+    document.body.append(dialog.el);
+    message.focus();
+  }
+
   async function loadTab(key) {
     activeTab = key;
     for (const btn of tabBar.querySelectorAll('.tab')) {
@@ -105,6 +178,12 @@ export async function render(container, ctx) {
   fill(tabBar, ...TABS.map(([key, title]) =>
     h('button', { class: 'tab', dataset: { tab: key }, onclick: () => loadTab(key) }, title)));
 
+  wakeBtn = h('button', {
+    class: 'btn btn-primary',
+    disabled: true,
+    onclick: openWakeModal,
+  }, '唤醒');
+
   fill(container,
     h('div', { class: 'page-head' },
       h('div', {},
@@ -112,9 +191,13 @@ export async function render(container, ctx) {
         h('p', { class: 'page-desc' },
           '人格的内心状态与决策轨迹。需要「设置 → 人格与生理 → 启用人格后台」才会产生数据。'),
       ),
-      h('button', { class: 'btn', onclick: () => refresh() }, '刷新'),
+      h('div', { class: 'row' },
+        wakeBtn,
+        h('button', { class: 'btn', onclick: () => refresh() }, '刷新'),
+      ),
     ),
     stateCards,
+    wakeResultHost,
     tabBar,
     tabBody,
   );

@@ -623,6 +623,44 @@ async def test_persona_tools_call_persona_agent_and_sleep_reason_compatibility()
     assert duration_only_result["result"]["record_id"] == "sleep-legacy"
 
 
+@pytest.mark.asyncio
+async def test_persona_tools_report_disabled_or_resting_as_failure():
+    class FakePersonaAgent:
+        async def on_eat_start(self, meal_type, duration_minutes, description):
+            return {"status": "disabled"}
+
+        async def on_sleep_start(self, duration_minutes, *, reason=""):
+            return {"status": "disabled"}
+
+        async def on_work_start(self, duration_minutes, *, reason=""):
+            return {"status": "resting", "message": "人格正在睡眠或进食，无法开始工作"}
+
+    cfg = _make_config(
+        persona_management_enabled=True,
+        energy_mode="tool",
+        satiety_mode="tool",
+    )
+    reg = build_default_registry(cfg)
+    executor = reg.get_executor(ToolContext(persona_agent=FakePersonaAgent()))
+
+    eat_result = await executor(
+        "eat",
+        {"meal_type": "早餐", "duration_minutes": 20, "description": "豆浆"},
+    )
+    sleep_result = await executor("sleep", {"duration_minutes": 30, "reason": "小睡"})
+    work_result = await executor(
+        "work", {"duration_minutes": 60, "reason": "整理资料"}
+    )
+
+    assert eat_result["ok"] is False
+    assert eat_result["status"] == "disabled"
+    assert sleep_result["ok"] is False
+    assert sleep_result["status"] == "disabled"
+    assert work_result["ok"] is False
+    assert work_result["status"] == "resting"
+    assert "无法开始工作" in work_result["brief"]
+
+
 def test_registry_upload_file_is_stub_schema():
     cfg = _make_config()
     reg = build_default_registry(cfg)

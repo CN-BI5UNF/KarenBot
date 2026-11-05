@@ -251,8 +251,10 @@ class _AsyncSendManager:
         normalized = [self._normalize_action(a) for a in actions]
         if not normalized:
             result = {
-                "ok": True,
-                "status": "sent",
+                "ok": False,
+                "status": "failed",
+                "brief": "没有可发送的有效消息。",
+                "error": "没有可发送的有效消息",
                 "qq_visible": False,
                 "send_id": send_id,
                 "count": 0,

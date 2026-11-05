@@ -29,6 +29,41 @@ _OUT_OF_BAND_DENIED_TOOLS = frozenset(
     }
 )
 
+_ADMIN_WAKE_DENIED_TOOLS = frozenset(
+    {
+        "start_agent_task",
+        "summarize_conversation",
+        "summarize_chat_history",
+        "send_private_messages",
+        "send_group_message",
+        "send_voice_message",
+        "upload_file",
+        "commit_send_attempt",
+        "recall_message",
+        "send_poke",
+        "set_msg_emoji_like",
+        "schedule_wakeup",
+    }
+)
+"""管理员唤醒对白只回显在 WebUI；禁止任何会自动触达 QQ 的工具。"""
+
+_ADMIN_WAKE_FALLBACK_REPLY = "唔……我醒了。怎么了？"
+
+
+def _admin_wake_reply_text(records: list[dict[str, Any]]) -> str:
+    """Only accept real assistant text for the WebUI wake bubble.
+
+    Tool-call arguments are deliberately ignored: a denied send tool should not
+    turn the intended QQ message into the wake-up line.
+    """
+    for record in reversed(records):
+        if record.get("role") != "assistant":
+            continue
+        content = str(record.get("content") or "").strip()
+        if content:
+            return content
+    return ""
+
 
 def _message_pipeline_global(name: str, fallback):
     module = sys.modules.get("core.message_pipeline")
@@ -111,6 +146,63 @@ class PipelineTurnsMixin:
             tool_denylist=denied_tools,
         )
 
+    async def run_admin_wake_turn(
+        self,
+        *,
+        admin_message: str = "",
+        reason: str = "",
+    ) -> str:
+        """Generate the "woken up by someone" line for the WebUI.
+
+        The reply is stored under ``system:wake`` and returned to the caller.
+        Outbound QQ tools are denied so this cannot leak into a real chat.
+        """
+        now = get_time()
+        message = str(admin_message or "").strip()
+        if len(message) > 2000:
+            message = message[:2000]
+        wake_reason = str(reason or "").strip() or "admin_webui"
+        await self._stop_subconscious_agent()
+        note = f"{now} 管理员从 WebUI 将你唤醒（{wake_reason}）。"
+        if message:
+            note += f" 管理员留言：{message}"
+        await self.history.add_system_note(
+            note,
+            conversation_id="system:wake",
+        )
+        task_context = (
+            f"现在是{now}。这是管理员从 WebUI 触发的唤醒轮，不是普通聊天，也不是定时任务。\n"
+            "你刚刚被人从睡眠中叫醒。请像真人被叫醒一样自然反应：可以有一点迷糊、"
+            "惊讶、关切或轻微抱怨，再根据管理员的留言决定是否追问。\n"
+            "回复只会显示在管理员的人格后台，不会自动发送到 QQ；因此不要调用任何发送、"
+            "撤回、戳一戳或定时发送工具。这一轮只需要回应叫醒本身，不要延续旧话题。"
+        )
+        user_event = (
+            "[系统事件 · 非用户消息] 管理员在 WebUI 点击了“唤醒”。\n"
+            f"唤醒原因：{wake_reason}\n"
+            f"管理员留言：{message or '（没有留言，只是把你叫醒）'}\n"
+            "请用一两句自然的话回应被叫醒；如果管理员说明了事情，先确认或直接询问。"
+        )
+        captured: list[dict[str, Any]] = []
+        try:
+            await self.run_one_turn(
+                task_context,
+                user_event=user_event,
+                conversation_id=None,
+                history_conversation_id="system:wake",
+                task_contract=(
+                    "管理员唤醒对白：像被人叫醒一样自然回应；不要发送 QQ 消息。"
+                ),
+                task_phase="admin_wake",
+                tool_denylist=_ADMIN_WAKE_DENIED_TOOLS,
+                capture_records=captured,
+                accept_plain_text=True,
+            )
+        except Exception:
+            logger.exception("管理员唤醒对白生成失败")
+        reply = _admin_wake_reply_text(captured)
+        return reply or _ADMIN_WAKE_FALLBACK_REPLY
+
     async def run_one_turn(
         self,
         task_context: str,
@@ -127,6 +219,8 @@ class PipelineTurnsMixin:
         tool_denylist: set[str] | frozenset[str] | None = None,
         trigger_inbound_seq: int = 0,
         seen_inbound_seq: int | None = None,
+        capture_records: list[dict[str, Any]] | None = None,
+        accept_plain_text: bool = False,
     ) -> None:
         """通用单轮 Agent 入口：注入 task_context，跑一轮，处理 collected。
 
@@ -143,6 +237,10 @@ class PipelineTurnsMixin:
             tool_denylist: 本轮不允许调用的工具名集合。schema 仍保持暴露，调用时返回 denied。
             trigger_inbound_seq: 触发本轮的入站消息 seq；主动轮没有单条触发消息时可为 0。
             seen_inbound_seq: 本轮开始时已复核到的入站 seq，用于发送工具的默认复核锚点。
+            capture_records: 若提供，追加本轮 Agent 的原始 records（用于需要回显
+                模型回复的系统轮）。
+            accept_plain_text: 仅用于不需要发送 QQ 消息的系统轮；为 True 时模型
+                只返回文本也会被当作最终回复，而不是被“必须调用工具”逻辑丢弃。
         """
         self.mark_activity()
         record_conversation_id = history_conversation_id or conversation_id
@@ -395,10 +493,13 @@ class PipelineTurnsMixin:
                     provider_limit_bytes=self._provider_request_body_limit_bytes(),
                     prompt_budget_tokens=active_budget.input_budget,
                     token_estimator=self._token_estimator(),
+                    accept_plain_text=accept_plain_text,
                 )
             finally:
                 self._send_manager.end_model_turn(conversation_id)
 
+            if capture_records is not None:
+                capture_records.extend(result.records)
             if result.records:
                 await self.history.add_records(
                     result.records,

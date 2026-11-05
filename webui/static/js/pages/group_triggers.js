@@ -40,6 +40,13 @@ export async function render(container, ctx) {
     value: 0,
     style: { width: '130px' },
   });
+  const cacheInput = h('input', {
+    type: 'number',
+    min: 0,
+    max: 500,
+    value: 50,
+    style: { width: '110px' },
+  });
   const addBtn = h('button', { class: 'btn' }, '添加群');
   const saveBtn = h('button', { class: 'btn btn-primary', onclick: save }, '保存并立即生效');
   const statusLine = h('p', { class: 'field-help' });
@@ -67,7 +74,7 @@ export async function render(container, ctx) {
       return;
     }
     fill(rulesHost, table(
-      ['群号', '最多连续消息数', '时间窗口（分钟）', '操作'],
+      ['群号', '最多连续消息数', '时间窗口（分钟）', '过滤缓存条数', '操作'],
       data.groups.map((rule, index) => {
         const max = h('input', {
           type: 'number',
@@ -83,6 +90,13 @@ export async function render(container, ctx) {
           value: rule.window_minutes,
           style: { width: '130px' },
         });
+        const cache = h('input', {
+          type: 'number',
+          min: 0,
+          max: 500,
+          value: rule.cache_messages,
+          style: { width: '110px' },
+        });
         max.oninput = () => {
           rule.max_messages = clamp(asInt(max.value, 0), 0, 1000);
           dirty = true;
@@ -91,10 +105,15 @@ export async function render(container, ctx) {
           rule.window_minutes = clamp(asInt(minutes.value, 0), 0, 1440);
           dirty = true;
         };
+        cache.oninput = () => {
+          rule.cache_messages = clamp(asInt(cache.value, 50), 0, 500);
+          dirty = true;
+        };
         return h('tr', {},
           h('td', { class: 'mono' }, String(rule.group_id)),
           h('td', {}, max, h('span', { class: 'field-help' }, ' 0 = 不限')),
           h('td', {}, minutes, h('span', { class: 'field-help' }, ' 0 = 不限')),
+          h('td', {}, cache, h('span', { class: 'field-help' }, ' 0 = 不缓存')),
           h('td', {}, h('button', {
             class: 'btn btn-sm btn-danger',
             onclick: () => {
@@ -161,10 +180,12 @@ export async function render(container, ctx) {
       group_id: groupId,
       max_messages: clamp(asInt(maxInput.value, 0), 0, 1000),
       window_minutes: clamp(asInt(minutesInput.value, 0), 0, 1440),
+      cache_messages: clamp(asInt(cacheInput.value, 50), 0, 500),
     });
     groupInput.value = '';
     maxInput.value = 0;
     minutesInput.value = 0;
+    cacheInput.value = 50;
     dirty = true;
     renderRules();
     renderStatus();
@@ -203,6 +224,7 @@ export async function render(container, ctx) {
           group_id: asInt(rule.group_id, 0),
           max_messages: clamp(asInt(rule.max_messages, 0), 0, 1000),
           window_minutes: clamp(asInt(rule.window_minutes, 0), 0, 1440),
+          cache_messages: clamp(asInt(rule.cache_messages, 50), 0, 500),
         })),
       });
       data = { ...data, ...result };
@@ -238,12 +260,15 @@ export async function render(container, ctx) {
         field('群号', groupInput),
         field('连续消息数', maxInput, '0 = 不按条数关闭'),
         field('时间窗口', minutesInput, '0 = 不按时间关闭，单位分钟'),
+        field('过滤缓存条数', cacheInput, '0 = 不缓存；超出后丢弃最旧消息'),
         h('div', { class: 'spacer' }),
         addBtn,
       ),
       h('p', { class: 'field-help' },
         '条数和时间窗口可以只填一个，也可以都填；都填时先满足哪个就关闭窗口。'
-        + '两者都为 0 时只接收 @ 消息。每次被 @ 会重新开启/刷新窗口。'),
+        + '两者都为 0 时只接收 @ 消息。每次被 @ 会重新开启/刷新窗口。'
+        + '被过滤的普通消息会进入该群的近期缓存，超过缓存条数后丢弃最旧记录；'
+        + '缓存只在 Runtime 内存中保留，重启后清空。'),
       rulesHost,
     ),
 
@@ -257,9 +282,10 @@ export async function render(container, ctx) {
     card('LLM 临时放行', '',
       h('ul', { style: { margin: 0, paddingLeft: '20px', color: 'var(--text-secondary)' } },
         h('li', {}, '模型可以调用 group_trigger_window open 临时放行群消息，最多同时覆盖 2 个群。'),
+        h('li', {}, 'open/extend/status 可用 history_limit 让模型决定附带最近几条被过滤消息；条数不会超过该群缓存上限。'),
         h('li', {}, '窗口快结束时，任务上下文会提示剩余条数/时间；模型可调用 extend 并自行决定延长多久。'),
-        h('li', {}, '模型也可以调用 close 提前关闭窗口；重启 Runtime 会清空所有临时窗口。'),
-        h('li', {}, '这里只配置触发规则，不会删除任何聊天记录；被过滤的普通消息不会进入模型历史。'),
+        h('li', {}, '模型也可以调用 close 提前关闭窗口；重启 Runtime 会清空所有临时窗口和过滤缓存。'),
+        h('li', {}, '被过滤的普通消息只进入有限的内存缓存，不会进入模型历史；超出缓存条数后立即丢弃。'),
       ),
     ),
   );

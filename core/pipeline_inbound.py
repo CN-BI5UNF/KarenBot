@@ -383,6 +383,7 @@ class PipelineInboundMixin:
         duration_minutes: int = 30,
         reason: str = "",
         default_group_id: int | None = None,
+        history_limit: int = 0,
     ) -> dict[str, Any]:
         """Update a transient receive window from the tool layer."""
         manager = getattr(self, "group_trigger", None)
@@ -394,6 +395,7 @@ class PipelineInboundMixin:
             duration_minutes=duration_minutes,
             reason=reason,
             default_group_id=default_group_id,
+            history_limit=history_limit,
         )
 
     def _group_trigger_allows(self, event: IncomingMessage, text: str) -> bool:
@@ -406,6 +408,15 @@ class PipelineInboundMixin:
             event.group_id or "",
             self._is_group_mention(event, text),
         )
+        if not decision.allowed:
+            manager.record_filtered(
+                event.group_id or "",
+                message_id=getattr(event, "message_id", None),
+                user_id=getattr(event, "user_id", None),
+                nickname=getattr(event, "nickname", None),
+                text=text,
+                timestamp=getattr(event, "timestamp", None),
+            )
         return decision.allowed
 
     async def _should_buffer_inbound_for_working_persona(self) -> bool:

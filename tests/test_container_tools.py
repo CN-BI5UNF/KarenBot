@@ -51,6 +51,14 @@ class FakeService:
         self.calls.append(("list", (path,), {}))
         return {"ok": True, "listing": ""}
 
+    async def delete_file(self, path, *, recursive=False):
+        self.calls.append(("delete", (path, recursive), {}))
+        return {"ok": True, "path": path, "recursive": recursive}
+
+    async def run_python(self, code, *, timeout_seconds=None):
+        self.calls.append(("python", (code,), {"timeout": timeout_seconds}))
+        return {"ok": True, "stdout": code, "sandbox": "container"}
+
     async def import_file(
         self, host_path, container_path, *, workspace_dir, overwrite=False
     ):
@@ -79,6 +87,10 @@ async def test_container_tool_dispatches_actions():
     assert result["ok"] is True
     assert service.calls[-1][0] == "exec"
 
+    await container_tool(
+        ContainerArgs(action="run_python", code="print(1)", timeout_seconds=5),
+        ctx,
+    )
     await container_tool(ContainerArgs(action="read_file", path="/workspace/a"), ctx)
     await container_tool(
         ContainerArgs(action="write_file", path="/workspace/a", content="x"), ctx
@@ -88,6 +100,10 @@ async def test_container_tool_dispatches_actions():
         ctx,
     )
     await container_tool(ContainerArgs(action="list_files"), ctx)
+    await container_tool(
+        ContainerArgs(action="delete_file", path="/workspace/a", recursive=True),
+        ctx,
+    )
     await container_tool(
         ContainerArgs(
             action="import_file",
@@ -108,10 +124,12 @@ async def test_container_tool_dispatches_actions():
     await container_tool(ContainerArgs(action="status"), ctx)
     assert [call[0] for call in service.calls] == [
         "exec",
+        "python",
         "read",
         "write",
         "edit",
         "list",
+        "delete",
         "import",
         "export",
         "reset",

@@ -166,6 +166,7 @@ class AgentRunner:
         provider_limit_bytes: int | None = None,
         prompt_budget_tokens: int | None = None,
         token_estimator: TokenEstimator | None = None,
+        accept_plain_text: bool = False,
     ) -> AgentRunResult:
         """执行多轮工具循环。
 
@@ -177,6 +178,9 @@ class AgentRunner:
             model_view_policy: 新工具结果/pending runtime message 的逐条投影策略。
                 None 或 enabled=False 时保持旧流程；执行控制始终使用完整的
                 raw result，投影只影响发给模型的副本。
+            accept_plain_text: 仅用于不需要发送 QQ 消息的系统轮（如管理员唤醒
+                对白）。为 True 时，模型只返回文本也会被当作本轮最终内容，而不是
+                被“必须调用工具”的重试逻辑丢弃。
         """
         policy = model_view_policy
         budget_estimator = token_estimator or TokenEstimator(
@@ -511,6 +515,15 @@ class AgentRunner:
 
             # === 分支 1：无工具调用 → 引导重试或终止 ===
             if not result.tool_calls:
+                if accept_plain_text:
+                    plain_text = (result.content or "").strip()
+                    if plain_text:
+                        assistant_record = self._build_assistant_record(result)
+                        msgs.append(assistant_record)
+                        records.append(assistant_record)
+                        final_content = plain_text
+                        finish_reason = "tool_stop"
+                        break
                 if await append_pending_context():
                     continue
                 if no_tool_retry_count <= 0:

@@ -99,7 +99,8 @@ async def test_send_private_forbidden_blocked(tmp_path):
             ]
         },
     )
-    assert result["ok"] is True
+    assert result["ok"] is False
+    assert result["status"] == "failed"
     assert result["count"] == 0
     assert "errors" in result
     assert ctx.collected == []
@@ -405,6 +406,8 @@ async def test_send_group_rejects_other_persona_appearance(tmp_path):
         },
     )
 
+    assert result["ok"] is False
+    assert result["status"] == "failed"
     assert result["count"] == 0
     assert "当前人格" in str(result.get("errors"))
     assert adapter.sent_images == []

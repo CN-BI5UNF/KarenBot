@@ -41,13 +41,23 @@ def _send_result(
     errors: list[str],
     action_count: int,
 ) -> dict:
+    ok = bool(sent)
     result: dict = {
-        "ok": bool(sent) or not action_count,
-        "status": "sent",
+        "ok": ok,
+        "status": "sent" if ok else "failed",
         "qq_visible": bool(sent),
         "count": len(sent),
         "sent": sent,
     }
+    if not ok:
+        if action_count <= 0:
+            result["brief"] = "没有可发送的有效消息。"
+            result["error"] = "没有可发送的有效消息"
+        else:
+            result["brief"] = "消息未能发送，请检查错误信息。"
+            result["error"] = "; ".join(errors) if errors else "发送失败"
+    elif errors:
+        result["warning"] = "部分消息未发送：" + "; ".join(errors)
     if errors:
         result["errors"] = errors
     return result
@@ -219,6 +229,9 @@ async def send_private_messages(args: SendPrivateArgs, ctx: ToolContext) -> dict
             }
         )
 
+    if not actions:
+        return _send_result(sent=[], errors=errors, action_count=0)
+
     if ctx.send_actions_cb is not None:
         _apply_reply_to_first_text(actions, args.reply_to_message_id)
         result = await ctx.send_actions_cb(
@@ -327,6 +340,9 @@ async def send_group_message(args: SendGroupArgs, ctx: ToolContext) -> dict:
                 **message_action,
             }
         )
+
+    if not actions:
+        return _send_result(sent=[], errors=errors, action_count=0)
 
     if ctx.send_actions_cb is not None:
         _apply_reply_to_first_text(actions, args.reply_to_message_id)

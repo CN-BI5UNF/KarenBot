@@ -84,7 +84,7 @@ class SendPrivateArgs(_ToolArgs):
     """send_private_messages 工具参数。"""
 
     targets: list[PrivateMessageTarget] = Field(
-        ..., description="要发送的目标列表，至少 1 项"
+        ..., min_length=1, description="要发送的目标列表，至少 1 项"
     )
     reviewed_until_seq: int | None = Field(
         default=None,
@@ -191,7 +191,7 @@ class SendGroupArgs(_ToolArgs):
 
     group_id: int = Field(..., description="群号")
     targets: list[GroupMessageTarget] = Field(
-        ..., description="要发送的消息列表，至少 1 项"
+        ..., min_length=1, description="要发送的消息列表，至少 1 项"
     )
     reviewed_until_seq: int | None = Field(
         default=None,
@@ -1013,6 +1013,16 @@ class GroupTriggerWindowArgs(_ToolArgs):
         max_length=300,
         description="为什么临时放行或延长窗口。",
     )
+    history_limit: int = Field(
+        default=20,
+        ge=0,
+        le=500,
+        description=(
+            "open/extend/status 时附带最近多少条被 @ 触发过滤的群消息，"
+            "每个群分别计数；0 = 不附带。条数由你根据上下文需要决定，"
+            "但不能超过该群配置的缓存上限。"
+        ),
+    )
 
 
 class ScheduleWakeupArgs(_ToolArgs):
@@ -1490,10 +1500,12 @@ class ContainerArgs(_ToolArgs):
 
     action: Literal[
         "exec",
+        "run_python",
         "read_file",
         "write_file",
         "edit_file",
         "list_files",
+        "delete_file",
         "import_file",
         "export_file",
         "reset",
@@ -1502,6 +1514,11 @@ class ContainerArgs(_ToolArgs):
     ] = Field(..., description="要执行的操作。")
     command: str = Field(
         default="", max_length=64 * 1024, description="exec 的 shell 命令。"
+    )
+    code: str = Field(
+        default="",
+        max_length=8 * 1024 * 1024,
+        description="run_python 的 Python 代码（最多 8 MiB）。",
     )
     path: str = Field(default="", max_length=1024, description="容器内 /workspace 路径。")
     content: str = Field(
@@ -1519,5 +1536,8 @@ class ContainerArgs(_ToolArgs):
     )
     timeout_seconds: float | None = Field(
         default=None, ge=1, le=1800, description="exec 超时覆盖（秒）。"
+    )
+    recursive: bool = Field(
+        default=False, description="delete_file 是否递归删除目录。"
     )
     overwrite: bool = Field(default=False, description="export_file 是否覆盖已存在目标。")

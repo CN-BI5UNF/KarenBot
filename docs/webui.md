@@ -365,22 +365,36 @@ https 输入。更新器只接受同一 `CN-BI5UNF/KarenBot` 仓库，拒绝 htt
 
 - `max_messages`：被 @ 后最多连续接收的普通消息数，0 表示不按条数关闭；
 - `window_minutes`：被 @ 后窗口最长分钟数，0 表示不按时间关闭；
+- `cache_messages`：被过滤普通消息的每群缓存上限（0-500，默认 50），超出后
+  丢弃最旧记录；0 表示不缓存；
 - 两者都填时先满足哪个就关闭；两者都为 0 时只接收 @ 消息。
 
 被 @ 后窗口会开启/刷新。窗口内的普通消息进入 pipeline，窗口外的普通消息在
-`core/pipeline_inbound.py` 直接被丢弃，不写历史/事件流，也不触发模型。规则保存后
-热更新，无需重启；窗口本身只存在 Runtime 内存中。
+`core/pipeline_inbound.py` 被丢弃，不写历史/事件流，也不触发模型，但会进入该群
+的有限内存缓存。规则保存后热更新，无需重启；窗口与缓存只存在 Runtime 内存中。
 
 模型侧有 `group_trigger_window` 工具：
 
 - `open`：临时放行 1-2 个群，时长由模型决定；
 - `extend`：延长即将结束的窗口（包括 @ 窗口），转换为 LLM 临时窗口；
 - `close`：提前关闭窗口；
-- `status`：查看活动窗口。
+- `status`：查看活动窗口；
+- `history_limit`：`open` / `extend` / `status` 时自动附带最近多少条被过滤的
+  群消息（按群分别计数，0 表示不附带）。条数由模型决定，但不会超过该群
+  `cache_messages` 上限。
 
 LLM 临时窗口最多同时覆盖 2 个群。`task_context` 会显示当前窗口剩余条数/时间和
 「即将结束」提示，模型可在关闭前调用 `extend`；窗口已关闭时可用 `open` 重新开启。
-被过滤的消息不会送到模型，因此不能等窗口关闭后再延长。
+被过滤的消息不会送到模型，因此不能等窗口关闭后再延长。缓存存在时，任务上下文
+会提示模型可用 `status + history_limit` 回看，但不会无条件把全部缓存塞进 prompt。
+
+## 人格后台唤醒
+
+`POST /api/mind/wake` 接收 `{"message": "叫醒留言", "reason": "admin_webui"}`。
+仅当人格状态为 `sleeping` 或 `collapsing` 时可用；其他状态返回 409。接口先调用
+`PersonaAgent.on_wakeup()`，再跑一轮 WebUI 专用对白，响应包含 `state`、`reply`
+和 `reply_error`。这一轮禁止所有会触达 QQ 的工具，回复只显示在人格后台；如果
+模型没有返回文本，`reply` 会是保守的兜底对白。
 
 ## 黑白名单
 

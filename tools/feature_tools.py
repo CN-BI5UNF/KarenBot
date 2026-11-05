@@ -36,6 +36,41 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
+_SEARCH_FAILURE_PREFIXES = (
+    "（搜索词为空）",
+    "（未启用任何搜索通道）",
+    "（免费搜索失败：",
+    "（官方搜索通道未配置）",
+    "（官方搜索失败：",
+    "（免费搜索不可用：",
+)
+
+_WEATHER_FAILURE_PREFIXES = (
+    "（城市名为空）",
+    "地理编码失败：",
+    "地理编码 API 错误：",
+    "地理编码响应不是 JSON：",
+    "未找到城市",
+    "实时天气 API 错误：",
+    "实时天气查询失败：",
+    "实时天气响应不是 JSON：",
+)
+
+
+def _service_error_text(value: Any, prefixes: tuple[str, ...]) -> str:
+    """Return the service error string, or '' when the result looks usable.
+
+    The search/weather services report failures as human-readable bracketed
+    strings instead of raising.  Tools must not wrap those strings in ok=True.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return "服务返回空结果"
+    first_line = text.splitlines()[0].strip()
+    if any(first_line.startswith(prefix) for prefix in prefixes):
+        return text
+    return ""
+
 
 @tool(
     name="describe_image",
@@ -381,6 +416,17 @@ async def web_search(args: WebSearchArgs, ctx: ToolContext) -> dict:
             "error": str(e),
         }
 
+    service_error = _service_error_text(result, _SEARCH_FAILURE_PREFIXES)
+    if service_error:
+        return {
+            "ok": False,
+            "status": "failed",
+            "brief": f"联网搜索失败：{service_error}",
+            "error": service_error,
+            "query": args.query,
+            "data": {"query": args.query},
+        }
+
     return {
         "ok": True,
         "status": "inline",
@@ -471,7 +517,20 @@ async def get_weather(args: GetWeatherArgs, ctx: ToolContext) -> dict:
             "error": str(e),
         }
 
-    return {
+    service_error = _service_error_text(result, _WEATHER_FAILURE_PREFIXES)
+    if service_error:
+        return {
+            "ok": False,
+            "status": "failed",
+            "brief": f"天气查询失败：{service_error}",
+            "error": service_error,
+            "data": {
+                "city": args.city,
+                "days": args.days,
+            },
+        }
+
+    response: dict[str, Any] = {
         "ok": True,
         "status": "inline",
         "brief": f"已查询 {args.city} 天气（{args.days} 天）。",
@@ -481,6 +540,9 @@ async def get_weather(args: GetWeatherArgs, ctx: ToolContext) -> dict:
             "days": args.days,
         },
     }
+    if "（预报" in str(result):
+        response["warning"] = "实时天气已返回，但部分预报数据不可用。"
+    return response
 
 
 @tool(
