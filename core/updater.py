@@ -57,7 +57,7 @@ RELEASES_CACHE_SECONDS = 300
 MAX_RELEASES = 40
 RELEASE_NOTES_DIR = "releases"
 RELEASE_NOTES_MAX_CHARS = 20_000
-APP_RELEASE_LABEL = "1.0.1-alpha"
+APP_RELEASE_LABEL = "1.0.1-alpha.1"
 DEPENDENCY_FILES = ("pyproject.toml", "uv.lock", "requirements.txt", "requirements-dev.txt")
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$")
 

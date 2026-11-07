@@ -233,7 +233,7 @@ def test_routed_profile_is_valid_config_and_settings_choice():
     spec = field_map()["behavior.tool_schema_profile"]
     values = [value for value, _label in spec["options"]]
     assert "routed" in values
-    assert "load_toolset" in spec["help"]
+    assert "load_toolset" in spec["option_help"]["routed"]
 
 
 def test_routed_prompt_policy_is_only_injected_in_routed_mode():

@@ -79,6 +79,9 @@ class PipelineToolContextMixin:
         extras["agent_sandbox_network"] = bool(
             getattr(agent_cfg, "sandbox_network", True)
         )
+        extras["work_tool_profile_cb"] = getattr(
+            self, "work_tool_profile_cb", None
+        )
         extras["task_phase"] = task_phase
         extras["seen_inbound_seq"] = int(seen_inbound_seq or trigger_inbound_seq or 0)
         extras["focus_user_ids"] = list(focus_user_ids or [])

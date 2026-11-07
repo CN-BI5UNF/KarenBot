@@ -76,6 +76,11 @@ Agent 模式推荐把 `behavior.tool_schema_profile` 设为 `agent`（需要重�
 `routed` 档位也包含 `coding` 工具集；`compact`/`full` 仍保留编码工具的 stub，
 可由 `tool_search` 解锁，但不会获得上述核心常加载体验。
 
+人格进入「工作」状态时，运行时会临时把主工具档位切换为 `agent`，退出工作后
+恢复配置中的原档位；这是运行时切换，不修改 `config.yaml`，也不需要重启 Runtime。
+`work` 工具结果和任务上下文会明确告诉模型当前档位以及 `tool_search select=[...]`
+的加载方式，避免模型按旧档位直接调用。配置本来就是 `agent` 时不会重复切换。
+
 ## 本机执行策略
 
 - `sandbox`（默认）：`agent_bash` 通过 bubblewrap 执行，只读绑定系统目录与 venv，

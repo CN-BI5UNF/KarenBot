@@ -119,6 +119,36 @@ SETTINGS_GROUPS: list[Section] = [
              "type": "float", "default": 600.0, "needs_restart": True},
             {"path": "behavior.proactive_context_token_budget", "label": "主动思考上下文预算",
              "type": "int", "default": 4096, "needs_restart": True},
+            {"path": "behavior.tool_schema_profile",
+             "label": "工具 schema 档位", "type": "enum", "default": "compact",
+             "options": [["compact", "compact（默认，省 token）"],
+                         ["full", "full（完整 schema，排查用）"],
+                         ["routed", "routed（工具集路由，实验）"],
+                         ["agent", "agent（编码推荐，延迟加载）"]],
+             "option_help": {
+                 "compact": "默认档位。常驻高频工具；其余工具先调用 tool_search 解锁。"
+                            "固定 schema 开销最低、兼容性最好，适合日常聊天和工具调用不多的场景。",
+                 "full": "旧行为。尽量把工具的完整 schema 直接发给模型；高风险/低频工具"
+                         "仍可能保留 stub。工具最全，但固定 token 开销最大，容易挤占上下文；"
+                         "只建议排查兼容问题或确实需要大量工具直接可见时使用。",
+                 "routed": "实验性两层路由。初始只暴露核心工具和工具集目录；模型先调用 "
+                           "list_toolsets / load_toolset 按“工具集”成组加载（如 history、workspace、"
+                           "web），再用 tool_search 查高级参数。优点：一次加载一整类工具，适合跨多个"
+                           "功能的宽任务，模型不必逐个记住工具名；缺点：一个工具集可能包含很多暂时"
+                           "用不到的 schema，加载后的固定 token 和选择噪声较大，而且要多一轮加载"
+                           "工具集。未加载调用会返回 need_toolset。",
+                 "agent": "编码推荐。初始只保留发送/收尾和核心编码工具（read/write/edit/bash/"
+                          "glob/grep/ls）；其他工具用 tool_search select=[...] 逐个加载，加载状态"
+                          "按会话记忆。优点：初始 schema 最小、按需精确，不会把无关工具组塞进上下文，"
+                          "最适合 coding agent 和“只需要少数工具”的任务；缺点：模型必须知道或先 "
+                          "query 出准确工具名，每加载一批工具可能多一轮，跨多个领域时反复加载会让"
+                          "上下文逐步变大。未加载调用会返回 need_tool_search。",
+             },
+             "needs_restart": True,
+             "help": "档位决定每轮工具 schema 如何暴露，不影响工具本身是否已注册；"
+                     "宽任务、需要整组工具时选 routed；编码或只需要少数精确工具时选 agent。"
+                     "人格进入工作模式时会临时切到 agent，退出后恢复此档位，不需要重启；"
+                     "手动修改此档位仍需重启 Runtime。"},
             {"path": "behavior.pending_request_timeout_seconds", "label": "待处理请求超时（秒）",
              "type": "float", "default": 1800.0, "needs_restart": True},
             {"path": "behavior.rate_limit.enabled", "label": "启用陌生人限流",
@@ -534,15 +564,6 @@ SETTINGS_GROUPS: list[Section] = [
              "min": 50, "max": 100, "needs_restart": False,
              "help": "仅用于统一预算状态展示；当前运行时仍使用上面的旧阈值"},
 
-            {"path": "behavior.tool_schema_profile",
-             "label": "工具 schema 档位", "type": "enum", "default": "compact",
-             "options": [["compact", "compact（省 token，推荐）"],
-                         ["full", "full（旧行为，排查用）"],
-                         ["routed", "routed（工具集双层路由，实验）"],
-                         ["agent", "agent（Claude-Code 式延迟加载，推荐用于编码）"]],
-             "needs_restart": True,
-             "help": "routed 初始只暴露核心工具和工具集目录，用 load_toolset 加载工具集；"
-                     "agent 初始只暴露核心工具，其余用 tool_search select=[...] 按需加载完整 schema。"},
             {"path": "behavior.kv_prompt_diagnostics",
              "label": "KV 诊断级别", "type": "enum", "default": "summary",
              "options": [["off", "off"], ["summary", "summary（轻量）"],

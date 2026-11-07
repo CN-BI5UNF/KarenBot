@@ -43,6 +43,27 @@ def _paths() -> list[str]:
 # ============================================================
 
 
+def test_tool_schema_profile_is_in_the_behavior_group():
+    """容器 Agent 卡片会引导用户到「软件行为」，字段必须真的在那里。"""
+    groups = {
+        field["path"]: group["key"]
+        for group in SETTINGS_GROUPS
+        for field in group["fields"]
+    }
+    assert groups["behavior.tool_schema_profile"] == "behavior"
+    assert field_map()["behavior.tool_schema_profile"]["label"] == "工具 schema 档位"
+
+
+def test_tool_schema_profile_explains_all_four_options():
+    spec = field_map()["behavior.tool_schema_profile"]
+    values = [value for value, _label in spec["options"]]
+    assert values == ["compact", "full", "routed", "agent"]
+    assert set(spec["option_help"]) == set(values)
+    for value in values:
+        # Each option needs a real explanation, not just a redesigned label.
+        assert len(spec["option_help"][value]) >= 40, value
+
+
 def test_field_paths_are_unique():
     paths = _paths()
     duplicates = sorted({p for p in paths if paths.count(p) > 1})

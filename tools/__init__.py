@@ -460,8 +460,15 @@ _STUB_RISK_LEVELS: dict[str, str] = {
 }
 
 
-def build_default_registry(config) -> ToolRegistry:
+def build_default_registry(
+    config,
+    *,
+    schema_profile_override: str | None = None,
+) -> ToolRegistry:
     """根据 RootConfig 构造稳定工具 Registry。
+
+    ``schema_profile_override`` is used for the temporary work-mode Agent
+    registry without writing the override back to config.yaml.
 
     规则：
         - messaging 工具（send_*/recall）：始终启用
@@ -492,7 +499,8 @@ def build_default_registry(config) -> ToolRegistry:
     }
 
     schema_profile = str(
-        getattr(getattr(config, "behavior", None), "tool_schema_profile", "compact")
+        schema_profile_override
+        or getattr(getattr(config, "behavior", None), "tool_schema_profile", "compact")
         or "compact"
     )
     routed = schema_profile == "routed"

@@ -728,7 +728,7 @@ async def test_version_and_available_snapshots_are_offline(tmp_path):
         allow_local_remote=True,
     )
     version = await service.version_info()
-    assert version["version_label"] == "1.0.1-alpha"
+    assert version["version_label"] == "1.0.1-alpha.1"
     assert version["commit"]
     assert version["commit_short"] == version["commit"][:10]
 

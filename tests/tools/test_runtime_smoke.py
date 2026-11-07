@@ -182,6 +182,12 @@ async def test_all_tools_have_clear_results_in_simulated_runtime(tmp_path, monke
             "default_reply_target": {"target_type": "private", "target_id": 123},
             "latest_user_message": "帮我测试工具",
             "self_id": "999",
+            "work_tool_profile_cb": lambda working: {
+                "changed": True,
+                "configured": "compact",
+                "effective": "agent" if working else "compact",
+                "notice": "工作模式工具档位临时说明" if working else "已恢复",
+            },
         },
     )
     _approve_stub_tools(ctx, "filter_archive_records")
@@ -428,6 +434,8 @@ async def test_all_tools_have_clear_results_in_simulated_runtime(tmp_path, monke
     assert results["eat"]["result"]["record_id"] == "eat-runtime"
     assert results["sleep"]["result"]["record_id"] == "sleep-runtime"
     assert results["work"]["result"]["action_until"] == 9999.0
+    assert results["work"]["tool_profile"]["effective"] == "agent"
+    assert "临时说明" in results["work"]["next"]
 
     assert results["read_file"]["data"]["range"] == "continuous_page"
     assert "old line" in results["read_file"]["content"]

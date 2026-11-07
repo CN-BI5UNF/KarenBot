@@ -94,6 +94,8 @@ class Runtime:
         self.decay_engine: Any = None
         self.sleep_consolidation: Any = None
         self.tool_registry: Any = None
+        self._configured_tool_registry: Any = None
+        self._work_agent_tool_registry: Any = None
         self.eat_tool: Any = None
         self.sleep_tool: Any = None
         self.wakeup_scheduler: Any = None
@@ -601,6 +603,7 @@ class Runtime:
         from tools import build_default_registry
 
         self.tool_registry = build_default_registry(self.config)
+        self._configured_tool_registry = self.tool_registry
         self.eat_tool = "eat" in self.tool_registry
         self.sleep_tool = "sleep" in self.tool_registry
         logger.debug("Runtime 阶段完成：工具注册 %.2fs", time.monotonic() - stage_t0)
@@ -754,9 +757,18 @@ class Runtime:
         )
         self.pipeline = MessagePipeline(**pipeline_kwargs)
         self.pipeline.image_budget_source = image_budget_source
+        self.pipeline.work_tool_profile_cb = self.set_work_tool_profile
         for name, value in persona_pipeline_kwargs.items():
             if not hasattr(self.pipeline, name):
                 setattr(self.pipeline, name, value)
+        # A restart can happen while the persona was already working; apply the
+        # temporary Agent profile before the first inbound turn.
+        is_working = getattr(self.persona_agent, "is_working", None)
+        if callable(is_working):
+            try:
+                self.set_work_tool_profile(bool(is_working()))
+            except Exception:  # noqa: BLE001 - optional optimization
+                logger.debug("恢复工作模式工具档位失败", exc_info=True)
         # 回填 wakeup 双向依赖
         self.wakeup_scheduler._on_fire = self.pipeline.run_wakeup_turn
 
@@ -896,6 +908,74 @@ class Runtime:
             base_url=vision.base_url,
             api_key_id=vision.api_key_id,
         )
+
+    def set_work_tool_profile(self, working: bool) -> dict[str, Any]:
+        """Temporarily use the Agent tool profile while the persona is working.
+
+        This changes only the live ToolRegistry; ``behavior.tool_schema_profile``
+        and config.yaml stay untouched, so leaving work restores the configured
+        profile without a Runtime restart.
+        """
+        configured = str(
+            getattr(self.config.behavior, "tool_schema_profile", "compact")
+            or "compact"
+        )
+        if configured == "agent":
+            return {
+                "changed": False,
+                "configured": configured,
+                "effective": "agent",
+                "notice": "当前配置本来就是 agent 档位，工作模式无需切换。",
+            }
+
+        if working:
+            if self._work_agent_tool_registry is None:
+                from tools import build_default_registry
+
+                self._work_agent_tool_registry = build_default_registry(
+                    self.config,
+                    schema_profile_override="agent",
+                )
+            target = self._work_agent_tool_registry
+            override = "agent"
+            notice = (
+                "工具档位已临时切换为 agent（原档位 "
+                f"{configured}）。现在直接可用：发送/收尾工具、tool_search、"
+                "agent_read/agent_write/agent_edit/agent_bash/agent_glob/"
+                "agent_grep/agent_ls；其它工具（包括原来直接可见的工具）需要先 "
+                "tool_search select=[\"工具名\"] 加载，下一次模型请求才会出现 "
+                "schema。未加载直接调用会返回 need_tool_search，不是任务失败；"
+                "退出工作模式后自动恢复原档位。"
+            )
+        else:
+            target = self._configured_tool_registry or self.tool_registry
+            override = None
+            notice = (
+                f"工作模式已结束，工具档位已恢复为 {configured}；agent 档位下"
+                "按需加载的工具不再默认可见，需要时按当前档位重新用 tool_search "
+                "查询/加载。"
+            )
+
+        changed = self.tool_registry is not target
+        if changed:
+            self.tool_registry = target
+            if self.pipeline is not None:
+                self.pipeline.set_tool_registry(
+                    target,
+                    profile_override=override,
+                    notice=None if working else notice,
+                )
+            logger.info(
+                "工作模式工具档位切换 effective=%s configured=%s",
+                target.schema_profile,
+                configured,
+            )
+        return {
+            "changed": changed,
+            "configured": configured,
+            "effective": str(getattr(target, "schema_profile", configured)),
+            "notice": notice,
+        }
 
     def _set_vision_failure(self, code: str) -> None:
         message = _VISION_FAILURE_MESSAGES.get(

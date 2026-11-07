@@ -41,6 +41,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections import OrderedDict
@@ -252,6 +253,10 @@ class MessagePipeline(
         self.archive = archive
         self.rolling_summary = rolling_summary
         self.tool_registry = tool_registry
+        self.work_tool_profile_cb: Any = None
+        self._tool_profile_override: str | None = None
+        self._tool_profile_restore_notice: str = ""
+        self._tool_profile_grace_registry: Any = None
         self.wakeup_scheduler = wakeup_scheduler
         self.pending_requests = pending_requests
         self.behavior_cfg = behavior_cfg
@@ -440,6 +445,85 @@ class MessagePipeline(
             self._toolset_sessions.move_to_end(key)
         return session
 
+    def set_tool_registry(
+        self,
+        registry: Any,
+        *,
+        profile_override: str | None = None,
+        notice: str | None = None,
+    ) -> None:
+        """Swap the live tool registry without rebuilding the pipeline.
+
+        Work mode uses this to expose the Agent profile for the duration of a
+        working session. Per-conversation ToolsetSession state is retained so
+        restoring routed/compact does not lose loaded toolsets.
+        """
+        previous = self.tool_registry
+        self.tool_registry = registry
+        self._tool_profile_override = profile_override
+        # Tool calls already emitted in the same assistant message may refer to
+        # the previous profile's schema. Keep the old registry as a one-loop
+        # grace target; the next tools_provider refresh clears it.
+        self._tool_profile_grace_registry = (
+            previous
+            if profile_override == "agent" and previous is not registry
+            else None
+        )
+        if notice:
+            self._tool_profile_restore_notice = str(notice)
+
+    def _sync_work_tool_profile(self, working: bool) -> None:
+        callback = getattr(self, "work_tool_profile_cb", None)
+        if not callable(callback):
+            return
+        try:
+            result = callback(bool(working))
+            if inspect.isawaitable(result):
+                logger.debug("忽略异步工作模式工具档位回调")
+        except Exception:  # noqa: BLE001 - optional optimization
+            logger.warning("同步工作模式工具档位失败", exc_info=True)
+
+    def _tool_profile_context_hint(self) -> str:
+        override = self._tool_profile_override
+        if override:
+            return (
+                f"工具档位临时说明：当前处于工作模式，使用 {override} 档位。"
+                "直接可用：发送/收尾工具、tool_search、agent_read/agent_write/"
+                "agent_edit/agent_bash/agent_glob/agent_grep/agent_ls；其它工具"
+                "（包括原档位直接可见的工具）需先 tool_search select=[...] 加载，"
+                "下一次模型请求才会出现 schema；未加载直接调用会返回 "
+                "need_tool_search，不是任务失败。退出工作模式后恢复原档位。"
+            )
+        notice = self._tool_profile_restore_notice
+        if notice:
+            self._tool_profile_restore_notice = ""
+            return f"工具档位恢复说明：{notice}"
+        return ""
+
+    def _dynamic_tool_executor(self, ctx: Any):
+        """Resolve the current registry per call so work-mode swaps are safe."""
+        async def executor(
+            tool_name: str,
+            raw_args: dict[str, Any],
+            *,
+            tool_call_id: str | None = None,
+        ) -> dict[str, Any]:
+            registry = self.tool_registry
+            session = ctx.extras.get("toolset_session")
+            if (
+                str(getattr(registry, "schema_profile", "")) == "agent"
+                and session is not None
+                and tool_name not in registry.agent_tool_names(session)
+            ):
+                grace = self._tool_profile_grace_registry
+                if grace is not None and tool_name in grace:
+                    registry = grace
+            ctx.extras["tool_registry"] = registry
+            inner = registry.get_executor(ctx)
+            return await inner(tool_name, raw_args, tool_call_id=tool_call_id)
+
+        return executor
+
     def _tool_schemas_for(self, session: ToolsetSession | None):
         if self._agent_profile_enabled():
             return self.tool_registry.get_agent_schemas(session)
@@ -448,11 +532,16 @@ class MessagePipeline(
         return self.tool_registry.get_schemas()
 
     def _tools_provider_for(self, session: ToolsetSession | None):
-        if self._agent_profile_enabled():
-            return lambda: self.tool_registry.get_agent_schemas(session)
-        if self._tool_routing_enabled():
-            return lambda: self.tool_registry.get_routed_schemas(session)
-        return None
+        # Always resolve live: work mode can swap the registry mid tool-loop
+        # (compact -> agent), and AgentRunner calls the provider before each loop.
+        def provider():
+            schemas = self._tool_schemas_for(session)
+            # All tool calls emitted in the previous assistant message have
+            # finished executing by the time the next loop asks for schemas.
+            self._tool_profile_grace_registry = None
+            return schemas
+
+        return provider
 
     def mark_activity(self) -> None:
         """刷新活动时间。主动思考只在足够空闲后触发。"""
@@ -510,6 +599,7 @@ class MessagePipeline(
             False if working_before_main
             else await self._should_buffer_inbound_for_resting_persona()
         )
+        self._sync_work_tool_profile(working_before_main)
         if working_before_main or resting_before_main:
             metadata = user_record.setdefault("metadata", {})
             if isinstance(metadata, dict):
@@ -578,7 +668,7 @@ class MessagePipeline(
             trigger_message_ids=batch_trigger_message_ids,
             toolset_session=toolset_session,
         )
-        executor = self.tool_registry.get_executor(ctx)
+        executor = self._dynamic_tool_executor(ctx)
         tools_schema = self._tool_schemas_for(toolset_session)
         _log_slow_batch_stage(
             "build_tool_context_schema",

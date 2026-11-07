@@ -63,6 +63,12 @@ class PipelineTaskContextMixin:
         if trigger_hint:
             parts.append(trigger_hint)
 
+        profile_hint_fn = getattr(self, "_tool_profile_context_hint", None)
+        if callable(profile_hint_fn):
+            profile_hint = profile_hint_fn()
+            if profile_hint:
+                parts.append(profile_hint)
+
         pending_info = self.pending_requests.to_prompt_text()
         if pending_info:
             parts.append(pending_info)

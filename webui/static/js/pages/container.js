@@ -298,7 +298,7 @@ export async function render(container, ctx) {
       h('div', { class: 'field-help', style: { marginTop: '12px' } },
         '安装只写入 /workspace/.karen-agents，不会重建容器或删除 /workspace 文件。'
         + '原生工具不需要外部 CLI 或额外依赖。'
-        + '建议在 设置 → 行为 → 工具 schema 档位 选择 agent，获得核心工具常加载 + '
+        + '建议在 设置 → 软件行为 → 工具 schema 档位 选择 agent，获得核心工具常加载 + '
         + 'ToolSearch 延迟加载。'),
       h('h3', { style: { marginTop: '18px' } }, '本机 Claude Code 执行方式'),
       h('div', { class: 'row row-wrap' },

@@ -4,6 +4,35 @@
 
 > 项目已由 Debata_Agent 更名为 KarenBot。以下历史条目保留当时的旧名称，以便追溯；上游项目仍为 [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent)。
 
+## [1.0.1-alpha.1] — 2026-11-06
+
+### Added
+
+- 人格进入「工作」状态时自动把主工具档位临时切到 `agent`，退出工作后恢复配置中的
+  原档位。切换只替换内存中的 `ToolRegistry`，不修改 `config.yaml`，也不需要重启
+  Runtime；`work` 工具结果和任务上下文会明确告诉模型当前可用工具、哪些工具需要
+  `tool_search select=[...]` 加载，以及未加载调用返回 `need_tool_search` 不是任务
+  失败。同一 assistant 消息里先调用 `work`、再调用旧档位工具时，保留一轮宽限
+  Registry，避免切换瞬间报错。
+- 设置 →「软件行为」新增「工具 schema 档位」字段（原先只在 Token 预算分组中），
+  并为 `compact` / `full` / `routed` / `agent` 四个选项补充说明，包含 routed 与
+  agent 的机制、优缺点和适用场景。
+
+### Changed
+
+- 容器页 Agent 模式卡片的提示文字改为准确的「设置 → 软件行为 → 工具 schema 档位」。
+- 设置页需要重启时明确提示「重启 Runtime（后端）」，并说明不需要重启或刷新前端；
+  保存这类字段后的 toast 也带上同样的说明。
+- 设置页枚举字段支持按当前选中项动态显示 `option_help`；工具档位说明会随选择切换。
+
+### Fixed
+
+- 修复工作模式切换后同一轮工具循环仍按旧 schema 执行导致的潜在调用错误；动态
+  executor 每次调用都解析当前 Registry，下一次 `tools_provider` 刷新时清理宽限状态。
+- 修复测试用简化 Pipeline 没有 `_dynamic_tool_executor` 时的兼容性回退。
+
+完整说明见 [`releases/v1.0.1-alpha.1.md`](releases/v1.0.1-alpha.1.md)。
+
 ## [1.0.1-alpha] — 2026-11-06
 
 ### Added

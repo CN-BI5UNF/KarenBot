@@ -251,7 +251,11 @@ class PipelineTurnsMixin:
             )
 
         working_check = getattr(self, "_should_buffer_inbound_for_working_persona", None)
-        if working_check is not None and await working_check():
+        working = bool(await working_check()) if working_check is not None else False
+        sync_profile = getattr(self, "_sync_work_tool_profile", None)
+        if callable(sync_profile):
+            sync_profile(working)
+        if working:
             await self.history.add_system_note(
                 f"{get_time()} 系统轮跳过：persona_working，当前人格正在工作。",
                 conversation_id=record_conversation_id or "system:global",
@@ -291,7 +295,12 @@ class PipelineTurnsMixin:
             tool_policy=tool_policy,
             toolset_session=toolset_session,
         )
-        executor = self.tool_registry.get_executor(ctx)
+        executor_for = getattr(self, "_dynamic_tool_executor", None)
+        executor = (
+            executor_for(ctx)
+            if callable(executor_for)
+            else self.tool_registry.get_executor(ctx)
+        )
         denied_tools = set(tool_denylist or ())
         schemas_for = getattr(self, "_tool_schemas_for", None)
         tools_schema = _filter_tool_schemas(

@@ -68,6 +68,18 @@ async def work(args: WorkArgs, ctx: ToolContext) -> dict:
     result = await _call_work_start(handler, args.duration_minutes, args.reason)
     wrapped = _persona_result(result, default_status="done", default_brief="已进入工作状态。")
     wrapped["reason"] = args.reason
+    if wrapped.get("ok"):
+        callback = ctx.extras.get("work_tool_profile_cb")
+        if callable(callback):
+            try:
+                profile_info = callback(True)
+            except Exception:  # noqa: BLE001 - profile switch is optional
+                logger.warning("工作模式工具档位切换失败", exc_info=True)
+            else:
+                if isinstance(profile_info, dict):
+                    wrapped["tool_profile"] = profile_info
+                    if profile_info.get("notice"):
+                        wrapped["next"] = profile_info["notice"]
     return wrapped
 
 

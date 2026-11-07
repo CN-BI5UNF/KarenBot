@@ -824,6 +824,38 @@ async def test_runtime_start_assembles_all_components(assembled_project):
         assert not (paths.memory_dir_for("test_bot") / "persona.db").exists()
         assert rt.adapter is not None
         assert rt.tool_registry is not None
+        assert rt.tool_registry.schema_profile == "compact"
+        switched = rt.set_work_tool_profile(True)
+        assert switched["changed"] is True
+        assert switched["effective"] == "agent"
+        assert rt.tool_registry.schema_profile == "agent"
+        assert rt.pipeline.tool_registry is rt.tool_registry
+        assert rt.pipeline._tool_profile_override == "agent"
+        assert "工作模式" in rt.pipeline._tool_profile_context_hint()
+        session = rt.pipeline._toolset_session_for("private:1")
+        agent_names = {
+            schema["function"]["name"]
+            for schema in rt.pipeline._tool_schemas_for(session)
+        }
+        assert "agent_read" in agent_names
+        assert "read_file" not in agent_names
+        provider = rt.pipeline._tools_provider_for(session)
+        assert provider is not None
+        assert "agent_read" in {
+            schema["function"]["name"] for schema in provider()
+        }
+        restored = rt.set_work_tool_profile(False)
+        assert restored["changed"] is True
+        assert restored["effective"] == "compact"
+        assert rt.tool_registry is rt._configured_tool_registry
+        assert rt.pipeline._tool_profile_override is None
+        assert "已恢复" in rt.pipeline._tool_profile_context_hint()
+        restored_names = {
+            schema["function"]["name"]
+            for schema in rt.pipeline._tool_schemas_for(session)
+        }
+        assert "read_file" in restored_names
+        assert rt.pipeline._agent_profile_enabled() is False
         assert rt.pending_requests is not None
         assert rt.wakeup_scheduler is not None
         assert rt.pipeline is not None

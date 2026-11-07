@@ -94,3 +94,16 @@ routed 初始始终暴露回复、收尾和常用上下文工具：发送/提交
 - 该档位不使用 `list_toolsets` / `load_toolset`；工具级 ToolSearch 取代工具集层。
 - 编码工具本身仍按 `agent_container_mode` 判断 Pi/DSH/Claude Code 能力；本机固定
   Claude Code 语义。详见 [`agent_modes.md`](agent_modes.md)。
+
+### 工作模式临时切换
+
+人格调用 `work` 工具进入「工作」状态后，主工具档位会在**不写配置、不重启
+Runtime**的情况下临时切到 `agent`；工作结束（到点或主动退出）后恢复原来的
+compact/full/routed 档位。切换期间：
+
+- `work` 工具结果带 `tool_profile` 和 `next`，告知模型档位已变、如何用
+  `tool_search select=[...]` 加载；
+- 任务上下文出现“工具档位临时说明”，避免模型继续按旧档位直接调用；
+- 恢复后下一轮任务上下文提示已恢复，agent 档位下按需加载的工具不再默认可见。
+
+如果配置本来就是 `agent`，工作模式不会重复切换。

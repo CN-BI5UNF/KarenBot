@@ -73,7 +73,7 @@ export async function render(container, ctx) {
     if (restartHint) return;
     restartHint = card(null, '',
       h('div', { class: 'row' },
-        h('span', {}, '有配置需要重启 Runtime 才能生效。'),
+        h('span', {}, '有配置需要重启 Runtime（后端）才能生效；不需要重启或刷新前端。'),
         h('div', { class: 'spacer' }),
         h('button', {
           class: 'btn btn-primary',
@@ -88,7 +88,7 @@ export async function render(container, ctx) {
               event.currentTarget.disabled = false;
             }
           },
-        }, '立即重启'),
+        }, '立即重启 Runtime'),
       ),
     );
     fill(hintHost, restartHint);
@@ -117,6 +117,21 @@ export async function render(container, ctx) {
       const select = h('select', {});
       for (const [val, label] of fieldSpec.options || []) {
         select.append(h('option', { value: val, selected: val === value }, label));
+      }
+      if (fieldSpec.option_help) {
+        const hint = h('div', { class: 'field-help' });
+        const refreshHint = () => {
+          hint.textContent = fieldSpec.option_help[select.value]
+            || fieldSpec.help || '';
+        };
+        select.addEventListener('change', () => {
+          onSave(select.value);
+          refreshHint();
+        });
+        refreshHint();
+        return h('label', { class: 'field' },
+          h('span', { class: 'field-label' }, fieldSpec.label),
+          select, hint);
       }
       select.addEventListener('change', () => onSave(select.value));
       return field(fieldSpec.label, select, fieldSpec.help || '');
@@ -249,8 +264,15 @@ export async function render(container, ctx) {
     try {
       const result = await endpoints.patchSetting(fieldSpec.path, value);
       fieldSpec.value = result.value;
-      ctx.toast(`${fieldSpec.label} 已保存`, 'ok');
-      if (result.needs_restart) markRestart();
+      if (result.needs_restart) {
+        ctx.toast(
+          `${fieldSpec.label} 已保存；需要重启 Runtime（后端）才生效，不需要重启前端`,
+          'ok',
+        );
+        markRestart();
+      } else {
+        ctx.toast(`${fieldSpec.label} 已保存`, 'ok');
+      }
       // 首次启用容器（或切到 C 模式）时，如果固定大小存储还没挂载，
       // 直接弹出一次管理员初始化窗口；B 模式不会触发。
       const containerSetupTrigger = (
