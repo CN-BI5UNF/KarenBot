@@ -59,9 +59,14 @@ def test_mode_capability_matrix_matches_install_recipes():
 def workspace(tmp_path: Path) -> Path:
     root = tmp_path / "workspace"
     root.mkdir()
-    (root / "note.txt").write_text("old line\nsecond line\n", encoding="utf-8")
+    # Explicit LF keeps read_raw expectations deterministic on Windows.
+    (root / "note.txt").write_text(
+        "old line\nsecond line\n", encoding="utf-8", newline="\n"
+    )
     (root / "sub").mkdir()
-    (root / "sub" / "code.py").write_text("print('hi')\n", encoding="utf-8")
+    (root / "sub" / "code.py").write_text(
+        "print('hi')\n", encoding="utf-8", newline="\n"
+    )
     return root
 
 
@@ -215,6 +220,29 @@ async def test_host_apply_patch_modify_create_delete(workspace):
     assert removed["ok"] is True
     assert removed["files"][0]["deleted"] is True
     assert not (workspace / "created.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_host_apply_patch_preserves_crlf(tmp_path):
+    root = tmp_path / "crlf"
+    root.mkdir()
+    (root / "note.txt").write_bytes(b"old line\r\nsecond line\r\n")
+    backend = HostBackend(root, execution_mode="host")
+    patch = (
+        "--- a/note.txt\n"
+        "+++ b/note.txt\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-old line\n"
+        "+new line\n"
+        " second line\n"
+    )
+    result = await backend.apply_patch(patch)
+    assert result["ok"] is True
+    assert (root / "note.txt").read_bytes() == b"new line\r\nsecond line\r\n"
+
+    read = await backend.read("note.txt", offset=2, limit=1)
+    assert read["ok"] is True
+    assert read["content"] == "2\tsecond line"
 
 
 @pytest.mark.asyncio

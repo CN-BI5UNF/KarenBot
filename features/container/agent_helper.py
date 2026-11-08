@@ -14,6 +14,12 @@ from __future__ import annotations
 AGENT_HELPER_SOURCE = r'''
 import difflib, fnmatch, json, os, re, stat, sys
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 ROOT = "/workspace"
 SKIP_DIRS = {
     ".git", ".hg", ".svn", ".venv", "venv", "node_modules", "__pycache__",
@@ -38,15 +44,18 @@ def norm(path):
         fail("路径不能为空", "agent_path_invalid")
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
         fail("路径包含控制字符", "agent_path_invalid")
-    if ".." in text.split("/"):
+    if ".." in re.split(r"[\\/]+", text):
         fail("路径不允许 ..", "agent_path_forbidden")
-    if not text.startswith("/"):
-        text = ROOT + "/" + text
+    if not os.path.isabs(text):
+        text = os.path.join(ROOT, text)
     normalized = os.path.normpath(text)
-    if normalized != ROOT and not normalized.startswith(ROOT + "/"):
+    root = os.path.normcase(os.path.normpath(ROOT))
+    candidate = os.path.normcase(normalized)
+    root_prefix = root if root.endswith(os.sep) else root + os.sep
+    if candidate != root and not candidate.startswith(root_prefix):
         fail("路径必须位于 /workspace", "agent_path_forbidden")
-    real = os.path.realpath(normalized)
-    if real != normalized:
+    real = os.path.normcase(os.path.realpath(normalized))
+    if real != candidate:
         fail("路径包含符号链接或越界", "agent_path_forbidden")
     return normalized
 
@@ -119,7 +128,7 @@ def do_read(req):
     rendered = []
     used = 0
     for index in range(start, end + 1):
-        piece = "%d\t%s" % (index, lines[index - 1].rstrip("\n"))
+        piece = "%d\t%s" % (index, lines[index - 1].rstrip("\r\n"))
         size = len(piece.encode("utf-8", "replace")) + 1
         if rendered and used + size > max_bytes:
             break

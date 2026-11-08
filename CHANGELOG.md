@@ -4,7 +4,7 @@
 
 > 项目已由 Debata_Agent 更名为 KarenBot。以下历史条目保留当时的旧名称，以便追溯；上游项目仍为 [binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent)。
 
-## [1.0.1-alpha.1] — 2026-11-06
+## [1.0.1-alpha.1] — 2026-11-07
 
 ### Added
 
@@ -30,6 +30,9 @@
 - 修复工作模式切换后同一轮工具循环仍按旧 schema 执行导致的潜在调用错误；动态
   executor 每次调用都解析当前 Registry，下一次 `tools_provider` 刷新时清理宽限状态。
 - 修复测试用简化 Pipeline 没有 `_dynamic_tool_executor` 时的兼容性回退。
+- 修复编码 Agent 的 Windows 兼容性：host 后端可读取 CRLF 文件、对 CRLF 文本应用
+  补丁并保留原换行，命令执行会查找 Git Bash；容器 helper 改用跨平台路径校验并
+  强制 UTF-8 stdout。Windows CI 的 7 个失败用例随之修复。
 
 完整说明见 [`releases/v1.0.1-alpha.1.md`](releases/v1.0.1-alpha.1.md)。
 

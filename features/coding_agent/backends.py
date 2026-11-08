@@ -55,6 +55,7 @@ _SKIP_DIRS = frozenset(
 
 _ENV_KEYS = (
     "PATH",
+    "PATHEXT",
     "LANG",
     "LC_ALL",
     "LC_CTYPE",
@@ -63,10 +64,29 @@ _ENV_KEYS = (
     "USER",
     "LOGNAME",
     "SHELL",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMFILES",
+    "PROGRAMW6432",
+    "PROGRAMDATA",
 )
 
 _APPLY_PATCH_SCRIPT = r'''
 import json, os, re, sys
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 def fail(message, code="agent_patch_failed"):
     print(json.dumps({"ok": False, "status": "failed", "brief": message,
@@ -124,7 +144,7 @@ def parse_hunks(lines, index):
             if line.startswith("\\"):
                 if rows:
                     kind, text = rows[-1]
-                    rows[-1] = (kind, text[:-1] if text.endswith("\n") else text)
+                    rows[-1] = (kind, text.rstrip("\r\n"))
                 index += 1
                 continue
             if line.startswith(" ") or line in ("\n", ""):
@@ -149,12 +169,17 @@ def parse_hunks(lines, index):
         while index < len(lines) and lines[index].startswith("\\"):
             if rows:
                 kind, text = rows[-1]
-                rows[-1] = (kind, text[:-1] if text.endswith("\n") else text)
+                rows[-1] = (kind, text.rstrip("\r\n"))
             index += 1
         hunks.append((old_start, rows))
     return hunks, index
 
 def apply_hunks(source, hunks):
+    # Preserve the target file's existing line ending when inserting lines.
+    # CRLF files are common on Windows; patch context is compared without EOL.
+    newline = "\n"
+    if any(line.endswith("\r\n") for line in source):
+        newline = "\r\n"
     result = []
     position = 0
     for old_start, rows in hunks:
@@ -168,14 +193,14 @@ def apply_hunks(source, hunks):
                 if position >= len(source):
                     fail("补丁上下文超出文件末尾")
                 actual = source[position]
-                if actual.rstrip("\n") != text.rstrip("\n"):
+                if actual.rstrip("\r\n") != text.rstrip("\r\n"):
                     fail("补丁上下文不匹配：期望 %r，实际 %r"
-                         % (text.rstrip("\n"), actual.rstrip("\n")))
+                         % (text.rstrip("\r\n"), actual.rstrip("\r\n")))
                 if kind == " ":
                     result.append(actual)
                 position += 1
             else:
-                result.append(text if text.endswith("\n") else text + "\n")
+                result.append(text.rstrip("\r\n") + newline)
     result.extend(source[position:])
     return result
 
@@ -226,7 +251,7 @@ def main():
                     if kind == "-":
                         fail("新建文件的补丁不能包含删除行")
                     if kind == "+":
-                        result.append(text if text.endswith("\n") else text + "\n")
+                        result.append(text.rstrip("\r\n") + "\n")
             final = result
         elif new_path == "/dev/null":
             target = old_path
@@ -351,6 +376,12 @@ def _apply_patch_result(result: dict[str, Any]) -> dict[str, Any]:
                 payload[key] = data[key]
         payload["ok"] = bool(data.get("ok")) and bool(payload.get("ok"))
         payload["status"] = "done" if payload["ok"] else "failed"
+    if not payload.get("ok") and not payload.get("error"):
+        # A subprocess failure may leave stdout unparsable (for example on a
+        # Windows console with legacy encoding); never drop the only diagnostic.
+        payload["error"] = str(
+            payload.get("stderr") or payload.get("brief") or "补丁应用失败"
+        ).strip() or "补丁应用失败"
     return payload
 
 
@@ -427,7 +458,10 @@ def _read_text_strict(path: Path) -> str:
 
 
 def _line_numbered(lines: list[str], start: int) -> str:
-    return "\n".join(f"{start + index}\t{line.rstrip(chr(10))}" for index, line in enumerate(lines))
+    return "\n".join(
+        f"{start + index}\t{line.rstrip(chr(13) + chr(10))}"
+        for index, line in enumerate(lines)
+    )
 
 
 def _count_occurrences(text: str, needle: str) -> int:
@@ -534,7 +568,7 @@ class HostBackend:
         rendered: list[str] = []
         used = 0
         for index, line in enumerate(selected, start=start):
-            piece = f"{index}\t{line.rstrip(chr(10))}"
+            piece = f"{index}\t{line.rstrip(chr(13) + chr(10))}"
             encoded = len(piece.encode("utf-8", errors="replace")) + 1
             if rendered and used + encoded > max_bytes:
                 break
@@ -705,7 +739,7 @@ class HostBackend:
         if len(stdin_bytes) > 1024 * 1024:
             return result_error("stdin 超过 1 MiB", code="agent_invalid_argument")
         if self.execution_mode == "host":
-            argv = ["/bin/bash", "-lc", command]
+            argv = _host_shell_command(command)
             env = _safe_env(home=Path.home())
             sandbox = "host"
         else:
@@ -1674,7 +1708,7 @@ async def _run_bounded(
             stdin=asyncio.subprocess.PIPE if stdin_bytes else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
+            start_new_session=os.name != "nt",
         )
     except FileNotFoundError as exc:
         return result_error(f"无法启动命令：{exc}", code="agent_bash_failed")
@@ -1718,7 +1752,43 @@ async def _run_bounded(
     }
 
 
+def _host_shell_command(command: str) -> list[str]:
+    """Choose a usable shell for host-mode commands.
+
+    Git for Windows provides bash, but it is not installed at ``/bin/bash``.
+    Fall back to cmd.exe only when no bash is available at all.
+    """
+    if os.name == "nt":
+        bash = shutil.which("bash")
+        if not bash:
+            candidates = [
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+                / "Git"
+                / "bin"
+                / "bash.exe",
+                Path(os.environ.get("ProgramW6432", r"C:\Program Files"))
+                / "Git"
+                / "bin"
+                / "bash.exe",
+            ]
+            for candidate in candidates:
+                if candidate.is_file():
+                    bash = str(candidate)
+                    break
+        if bash:
+            return [bash, "-lc", command]
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command]
+    bash = shutil.which("bash") or "/bin/bash"
+    return [bash, "-lc", command]
+
+
 def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    if os.name == "nt":
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        return
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):

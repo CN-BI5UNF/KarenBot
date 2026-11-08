@@ -27,6 +27,7 @@ def helper(tmp_path: Path):
             [sys.executable, "-I", str(script), action],
             input=json.dumps(payload),
             text=True,
+            encoding="utf-8",
             capture_output=True,
             timeout=30,
         )
