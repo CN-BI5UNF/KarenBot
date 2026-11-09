@@ -304,3 +304,5 @@ KarenBot/
 - 上游项目：[binglang001/Debata_Agent](https://github.com/binglang001/Debata_Agent) 及其贡献者；原版权归原作者所有。
 - 改名/重构说明见 [NOTICE](NOTICE)。
 - Karen 角色名称来源于海绵宝宝；相关角色版权归原权利方所有，本项目不主张任何官方关联。
+
+喜欢的话就给个start吧~ ciallo~
