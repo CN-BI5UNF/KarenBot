@@ -83,8 +83,9 @@ GUI 功能：
 
 `.github/workflows/build-installer.yml` 使用公开仓库的免费标准 runner：
 
-- `windows-latest` → `KarenBot-Installer.exe`（windowed，无黑框）；
-- `ubuntu-24.04` → `KarenBot-Installer`（保留 console，方便终端/CI）；
+- `windows-latest` → `KarenBot-Installer.exe`（x64，windowed，无黑框）；
+- `ubuntu-24.04` → `KarenBot-Installer`（x64，保留 console）；
+- `ubuntu-24.04-arm` → `KarenBot-Installer`（arm64，保留 console）；
 - `workflow_dispatch` 手动触发；
 - 推送 `installer-v*` tag 时自动把两个产物附加到 GitHub Release。
 

@@ -68,7 +68,16 @@ jobs:
 
   build-linux:
     needs: verify
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            artifact: installer-linux-x64
+          - runner: ubuntu-24.04-arm
+            artifact: installer-linux-arm64
+    runs-on: ${{ matrix.runner }}
+    name: build-linux-${{ matrix.artifact }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -98,7 +107,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: installer-linux-x64
+          name: ${{ matrix.artifact }}
           path: dist/KarenBot-Installer
           if-no-files-found: error
 

@@ -68,8 +68,9 @@ installer/
 
 `.github/workflows/build-installer.yml` 在 **公开仓库的免费标准 runner** 上构建：
 
-- `windows-latest`：PyInstaller windowed 单文件 exe；
-- `ubuntu-24.04`：PyInstaller 单文件（console 保留，便于终端和 CI）；
+- `windows-latest`：PyInstaller windowed 单文件 exe（x64）；
+- `ubuntu-24.04`：PyInstaller 单文件（x64，console 保留）；
+- `ubuntu-24.04-arm`：PyInstaller 单文件（arm64，console 保留）；
 - `workflow_dispatch` 手动触发；推送 `installer-v*` tag 时自动附加到 Release。
 
 不构建 macOS（公开仓库也按 10 倍分钟计费，当前不需要）。安装器不内置

@@ -58,10 +58,12 @@ def test_github_actions_builds_installer_on_free_runners():
     assert "workflow_dispatch" in workflow
     assert "windows-latest" in workflow
     assert "ubuntu-24.04" in workflow
+    assert "ubuntu-24.04-arm" in workflow
     assert "PyInstaller" in workflow
     assert "installer-v*" in workflow
     assert "installer-windows-x64" in workflow
     assert "installer-linux-x64" in workflow
+    assert "installer-linux-arm64" in workflow
     # macOS runner 对公开仓库也按 10 倍分钟计费；当前不需要。
     assert "macos" not in workflow.casefold()
 
