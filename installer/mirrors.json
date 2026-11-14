@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "updated_at": "2026-11-14",
+  "mirrors": [
+    {
+      "name": "direct",
+      "kind": "direct",
+      "enabled": true,
+      "note": "GitHub 直连（最可信，但可能受网络影响）"
+    },
+    {
+      "name": "ghproxy-net",
+      "kind": "prefix",
+      "prefix": "https://ghproxy.net/https://github.com",
+      "enabled": true,
+      "note": "ghproxy 反向代理（以实际可用性为准）"
+    },
+    {
+      "name": "gh-proxy-com",
+      "kind": "prefix",
+      "prefix": "https://gh-proxy.com/https://github.com",
+      "enabled": true,
+      "note": "gh-proxy 公共镜像（以实际可用性为准）"
+    },
+    {
+      "name": "gh-proxy-org",
+      "kind": "prefix",
+      "prefix": "https://gh-proxy.org/https://github.com",
+      "enabled": true,
+      "note": "gh-proxy.org（以实际可用性为准）"
+    },
+    {
+      "name": "ghproxy-cn",
+      "kind": "prefix",
+      "prefix": "https://ghproxy.cn/https://github.com",
+      "enabled": true,
+      "note": "ghproxy.cn（以实际可用性为准）"
+    },
+    {
+      "name": "ghproxy-cfd",
+      "kind": "prefix",
+      "prefix": "https://ghproxy.cfd/https://github.com",
+      "enabled": true,
+      "note": "ghproxy.cfd（以实际可用性为准）"
+    }
+  ]
+}
