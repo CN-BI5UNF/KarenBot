@@ -1,0 +1,137 @@
+name: Build Installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "installer-v*"
+  pull_request:
+    paths:
+      - "installer/**"
+      - "tests/test_installer*.py"
+      - ".github/workflows/build-installer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest ruff
+
+      - name: Installer tests
+        run: python -m pytest --noconftest tests/test_installer.py tests/test_installer_gui_contract.py -q
+
+      - name: Ruff
+        run: python -m ruff check installer tests/test_installer.py tests/test_installer_gui_contract.py
+
+  build-windows:
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+
+      - name: Build installer
+        run: python -m PyInstaller installer/KarenBot-Installer.spec --noconfirm --clean
+
+      - name: Smoke check frozen exe
+        run: .\dist\KarenBot-Installer.exe --check
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows-x64
+          path: dist/KarenBot-Installer.exe
+          if-no-files-found: error
+
+  build-linux:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            artifact: installer-linux-x64
+          - runner: ubuntu-24.04-arm
+            artifact: installer-linux-arm64
+    runs-on: ${{ matrix.runner }}
+    name: build-linux-${{ matrix.artifact }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tk, Xvfb and venv
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk python3-venv xvfb
+
+      - name: Create build venv with system Python
+        run: |
+          /usr/bin/python3 -m venv .build-venv
+          .build-venv/bin/python -m pip install --upgrade pip
+          .build-venv/bin/python -m pip install pyinstaller pytest
+          .build-venv/bin/python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+
+      - name: GUI smoke test from source
+        run: |
+          xvfb-run -a .build-venv/bin/python -m pytest --noconftest tests/test_installer_gui_flow.py -q
+          xvfb-run -a .build-venv/bin/python installer/gui_install.py --smoke-test
+
+      - name: Build installer
+        run: .build-venv/bin/python -m PyInstaller installer/KarenBot-Installer.spec --noconfirm --clean
+
+      - name: Smoke check frozen binary
+        run: xvfb-run -a dist/KarenBot-Installer --smoke-test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/KarenBot-Installer
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/installer-v')
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Attach installers to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "KarenBot Installer $tag" --notes "Automated installer build."
+          fi
+          gh release upload "$tag" artifacts/* --clobber
