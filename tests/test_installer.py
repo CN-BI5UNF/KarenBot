@@ -101,9 +101,11 @@ def test_install_local_source_builds_launchers(tmp_path):
         download_fonts=False,
     )
     assert (install_dir / "app" / "backend").is_dir()
-    launcher = (install_dir / "launch-gui.sh").read_text(encoding="utf-8")
-    assert f"cd '{install_dir / 'app'}'" in launcher
+    launcher_name = "launch-gui.cmd" if installer.IS_WINDOWS else "launch-gui.sh"
+    launcher = (install_dir / launcher_name).read_text(encoding="utf-8")
     assert "-m gui" in launcher
+    if not installer.IS_WINDOWS:
+        assert f"cd '{install_dir / 'app'}'" in launcher
 
 
 def test_install_fonts_writes_fontconfig(tmp_path, monkeypatch):
@@ -167,9 +169,11 @@ def test_install_archive_with_prebuilt_executable(tmp_path):
     )
     app = install_dir / "app"
     assert (app / "KarenBot-GUI.exe").is_file()
-    assert (app / "KarenBot-GUI.exe").stat().st_mode & 0o111
+    if not installer.IS_WINDOWS:
+        assert (app / "KarenBot-GUI.exe").stat().st_mode & 0o111
     assert not (install_dir / "venv").exists()
-    launcher = (install_dir / "launch-gui.sh").read_text(encoding="utf-8")
+    launcher_name = "launch-gui.cmd" if installer.IS_WINDOWS else "launch-gui.sh"
+    launcher = (install_dir / launcher_name).read_text(encoding="utf-8")
     assert "KarenBot-GUI.exe" in launcher
     manifest = (app / "modules.json").read_text(encoding="utf-8")
     assert '"installer": "prebuilt-archive"' in manifest

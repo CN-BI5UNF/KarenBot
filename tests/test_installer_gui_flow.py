@@ -63,6 +63,9 @@ def _make_app(tmp_path: Path, monkeypatch):
     app.install_dir.set(str(tmp_path / "install"))
     app.download_fonts.set(False)
     app.create_shortcut.set(False)
+    if os.name == "nt":
+        # Windows 源码安装只允许 WebUI；GUI 需要预构建 GTK4 包。
+        app.frontend.set("webui")
     return root, app, messages
 
 
