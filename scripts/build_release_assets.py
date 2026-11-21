@@ -107,7 +107,7 @@ def build(tag: str, output: Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", required=True, help="发行版 tag，例如 v2.0.0-alpha")
+    parser.add_argument("--tag", required=True, help="发行版 tag，例如 v2.0.0-alpha.1")
     parser.add_argument(
         "--output", default=str(ROOT / "dist"), help="资产输出目录"
     )

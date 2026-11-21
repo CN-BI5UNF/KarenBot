@@ -12,17 +12,17 @@ from scripts.verify_modules import COMPONENT_ORDER, load_lock, verify
 def test_lock_matches_submodules():
     lock = load_lock()
     assert lock["schema"] == 1
-    assert lock["release"] == "v2.0.0-alpha"
+    assert lock["release"] == "v2.0.0-alpha.1"
     for component in COMPONENT_ORDER:
         entry = lock["components"][component]
-        assert entry["tag"] == "v2.0.0-alpha"
+        assert entry["tag"] == "v2.0.0-alpha.1"
         assert len(entry["commit"]) == 40
-    verify("v2.0.0-alpha")
+    verify("v2.0.0-alpha.1")
 
 
 def test_assemble_check():
     lock = check()
-    assert lock["release"] == "v2.0.0-alpha"
+    assert lock["release"] == "v2.0.0-alpha.1"
 
 
 def test_assemble_gui_tree(tmp_path: Path):
@@ -35,9 +35,9 @@ def test_assemble_gui_tree(tmp_path: Path):
     assert not (output / "webui").exists()
     manifest = json.loads((output / "modules.json").read_text(encoding="utf-8"))
     assert manifest["frontend"] == "gui"
-    assert manifest["distribution"]["tag"] == "v2.0.0-alpha"
-    assert manifest["components"]["backend"]["version"] == "2.0.0-alpha"
-    assert manifest["components"]["gui"]["version"] == "2.0.0-alpha"
+    assert manifest["distribution"]["tag"] == "v2.0.0-alpha.1"
+    assert manifest["components"]["backend"]["version"] == "2.0.0-alpha.1"
+    assert manifest["components"]["gui"]["version"] == "2.0.0-alpha.1"
     assert "webui" not in manifest["components"]
 
 

@@ -6,12 +6,12 @@ KarenBot 是一个可以长期运行在你自己电脑或服务器上的角色�
 
 项目完全本地部署，模型请求直接发送给你配置的提供商；聊天记录、人格、密钥和知识库都保存在本机。
 
-- 最新发行版：**v2.0.0-alpha**
+- 最新发行版：**v2.0.0-alpha.1**
 - 支持平台：Windows 10/11 x64、Linux（x64 / arm64）
 - 两种界面：原生 **GTK4 GUI** / 浏览器 **WebUI**
 - 许可证：Apache-2.0
 
-> v2 是统一发行版，后端、GUI、WebUI 必须一起更新。当前为 alpha 预览版，接口和数据格式仍可能变化，升级前请备份。
+> v2 是统一发行版，默认同时更新后端与当前前端；也可以在更新页只更新其中一个组件。当前为 alpha 预览版，接口和数据格式仍可能变化，升级前请备份。
 
 ---
 
@@ -314,7 +314,7 @@ cd KarenBot
 git submodule update --init --recursive
 
 # 校验版本锁定
-python scripts/verify_modules.py --tag v2.0.0-alpha
+python scripts/verify_modules.py --tag v2.0.0-alpha.1
 
 # 组装一个可运行目录（只含 tracked files）
 python scripts/assemble.py --frontend webui --output dist/app
@@ -346,12 +346,15 @@ GUI 在 Linux 上还需要系统 GTK4/PyGObject；Windows 开发请使用安装�
 
 ### v2 用户
 
-在 GUI/WebUI 的「设置 → 更新」中检查 KarenBot 统一发行版。更新会同时更新后端和当前前端，不能只更新一个组件。
+在 GUI/WebUI 的「设置 → 更新」中检查 KarenBot 统一发行版。
 
-- 稳定版会自动提示；
-- Pre-release 需要手动选择，并确认风险；
+- 默认同时更新后端和当前前端；也可以只更新后端或只更新当前前端；
+- 只更新前端时不需要重启后端（GUI 需完全退出重开，WebUI 刷新页面）；只更新后端时需要重启后端；
+- 稳定版会自动提示；Pre-release 需要手动选择，并确认风险；
 - 更新前逐文件备份到 `data/module_backups/`；
 - 用户数据、人格、插件和配置不会被覆盖。
+
+> 单组件更新后两端版本可能不一致。若出现接口错误，请再更新另一个组件，或选择「重新安装全部」。
 
 ### 0.1.x 用户
 
@@ -360,7 +363,7 @@ GUI 在 Linux 上还需要系统 GTK4/PyGObject；Windows 开发请使用安装�
 1. 后端 `v0.1.11-alpha.1`；
 2. GUI/WebUI `v0.1.1-alpha.2`；
 3. 重启应用；
-4. 在更新页手动选择 `v2.0.0-alpha`。
+4. 在更新页手动选择最新 v2 发行版（当前为 `v2.0.0-alpha.1`）。
 
 详见 [`docs/transition.md`](docs/transition.md)。
 
@@ -418,7 +421,7 @@ GUI 在 Linux 上还需要系统 GTK4/PyGObject；Windows 开发请使用安装�
 
 | 版本 | 状态 |
 |---|---|
-| `v2.0.0-alpha` | 最新发行版（统一发行版，预览版） |
+| `v2.0.0-alpha.1` | 最新发行版（支持后端/前端分开更新，预览版） |
 | `v0.1.x` 模块线 | 需过渡补丁升级到 v2 |
 | `v1.0.x` 绑定版 | 已停止支持，仅保留归档 |
 

@@ -14,7 +14,7 @@ KarenBot-GUI-<tag>.tar.gz
 KarenBot-WebUI-<tag>.tar.gz
 ```
 
-`<tag>` 例如 `v2.0.0-alpha`。资产由 `.github/workflows/release.yml` 调用
+`<tag>` 例如 `v2.0.0-alpha.1`。资产由 `.github/workflows/release.yml` 调用
 `scripts/build_release_assets.py` 从 `modules.lock.json` 固定的 commit 生成。
 
 ## modules.json
@@ -22,13 +22,13 @@ KarenBot-WebUI-<tag>.tar.gz
 ```json
 {
   "schema": 1,
-  "release": "v2.0.0-alpha",
+  "release": "v2.0.0-alpha.1",
   "components": {
     "backend": {
       "repo": "CN-BI5UNF/KarenBot-backend",
-      "tag": "v2.0.0-alpha",
-      "version": "2.0.0-alpha",
-      "asset": "KarenBot-backend-v2.0.0-alpha.tar.gz",
+      "tag": "v2.0.0-alpha.1",
+      "version": "2.0.0-alpha.1",
+      "asset": "KarenBot-backend-v2.0.0-alpha.1.tar.gz",
       "sha256": "64 位十六进制",
       "size": 123456
     },
@@ -60,10 +60,10 @@ KarenBot-WebUI-<tag>.tar.gz
    {
      "schema": 1,
      "frontend": "gui",
-     "distribution": {"repo": "CN-BI5UNF/KarenBot", "tag": "v2.0.0-alpha"},
+     "distribution": {"repo": "CN-BI5UNF/KarenBot", "tag": "v2.0.0-alpha.1"},
      "components": {
-       "backend": {"repo": "...", "dir": "backend", "tag": "v2.0.0-alpha", "version": "2.0.0-alpha"},
-       "gui": {"repo": "...", "dir": "gui", "tag": "v2.0.0-alpha", "version": "2.0.0-alpha"}
+       "backend": {"repo": "...", "dir": "backend", "tag": "v2.0.0-alpha.1", "version": "2.0.0-alpha.1"},
+       "gui": {"repo": "...", "dir": "gui", "tag": "v2.0.0-alpha.1", "version": "2.0.0-alpha.1"}
      }
    }
    ```
@@ -73,7 +73,8 @@ KarenBot-WebUI-<tag>.tar.gz
 
 - **不要**用 `https://github.com/CN-BI5UNF/KarenBot/archive/refs/tags/<tag>.tar.gz`
   代替组件资产：GitHub 源码归档不包含 submodule 内容。
-- **不要**只安装后端或只安装一个前端；v2 是统一发行版。
+- **不要**让安装器只安装后端或只安装一个前端；首次安装必须同时安装后端与所选前端。
+  已安装用户可以在更新页选择单独更新某个组件。
 - **不要**在没有 manifest 哈希的情况下从第三方镜像安装。
 - 旧 1.0.x 安装器不兼容 v2；0.1.x 安装器必须先升级到过渡版，或由用户更新安装器后重装。
 
@@ -83,8 +84,8 @@ KarenBot-WebUI-<tag>.tar.gz
 
 1. 安装后端 `v0.1.11-alpha.1` 与 GUI/WebUI `v0.1.1-alpha.2`（稳定过渡补丁）；
 2. 重启应用；
-3. 在更新页手动选择 `v2.0.0-alpha`（Pre-release）；
-4. 更新器会同时写后端与当前前端。
+3. 在更新页手动选择 `v2.0.0-alpha.1`（Pre-release）；
+4. 更新器默认同时写后端与当前前端，也可以在更新页只选择其中一个组件。
 
 过渡版的后端更新器只读取 KarenBot 主仓库的 `modules.json` 发行版；它不会再从三个
 组件仓库拼装版本。
