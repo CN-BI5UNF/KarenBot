@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,7 @@ REPO_NAMES = {
     "gui": "KarenBot-GUI",
     "webui": "KarenBot-WebUI",
 }
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 class VerificationError(RuntimeError):
@@ -52,13 +54,17 @@ def load_lock(path: Path = LOCK_PATH) -> dict[str, Any]:
                 raise VerificationError(
                     f"modules.lock.json 的 {component}.{key} 为空"
                 )
-        if not str(entry["path"]).startswith("modules/"):
+        relative = Path(str(entry["path"]))
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or len(relative.parts) < 2
+            or relative.parts[0] != "modules"
+        ):
             raise VerificationError(
                 f"{component} 的 path 必须位于 modules/ 下"
             )
-        if not str(entry["commit"]).startswith(
-            tuple("0123456789abcdef")
-        ) or len(str(entry["commit"])) < 7:
+        if not _COMMIT_RE.match(str(entry["commit"])):
             raise VerificationError(f"{component} 的 commit 不合法")
     return data
 

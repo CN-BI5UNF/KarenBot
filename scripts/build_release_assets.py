@@ -65,6 +65,8 @@ def _archive(module: Path, commit: str, destination: Path, prefix: str) -> None:
 
 def build(tag: str, output: Path) -> dict[str, Any]:
     lock = verify(tag)
+    if output.is_symlink():
+        raise VerificationError("输出目录不能是符号链接")
     output = output.resolve()
     if output == ROOT:
         raise VerificationError("输出目录不能是仓库根目录")

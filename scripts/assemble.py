@@ -112,6 +112,8 @@ def assemble(frontend: str, output: Path, *, force: bool = False) -> None:
     if frontend not in FRONTENDS:
         raise VerificationError(f"未知前端：{frontend}")
     lock = verify()
+    if output.is_symlink():
+        raise VerificationError("输出目录不能是符号链接")
     output = output.resolve()
     if output == ROOT:
         raise VerificationError("输出目录不能是仓库根目录")
