@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> 这是旧版 KarenBot 1.x 开发分支（`refactor/main`），不再作为安装入口。
+> 最新发行版：**[v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot/releases/tag/v2.0.0-alpha)**（统一发行版）。
+> 当前安装与开发文档请以 [`main`](https://github.com/CN-BI5UNF/KarenBot/tree/main) 分支为准；本分支 README 仅保留当时的功能与开发说明。
+
 <div align="center">
 
 # KarenBot
