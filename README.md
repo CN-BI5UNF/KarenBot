@@ -131,7 +131,7 @@ KarenBot 可以在启动时拉起多个外部程序，例如 NapCat、SnowLuma�
 
 2. 下载 `KarenBot-Installer.exe`：
 
-   <https://github.com/CN-BI5UNF/KarenBot-Installer/releases/download/v1.1.1/KarenBot-Installer.exe>
+   <https://github.com/CN-BI5UNF/KarenBot-Installer/releases/download/v1.1.2/KarenBot-Installer.exe>
 
 3. 双击运行。如果 SmartScreen 提示未知发布者，选择「更多信息 → 仍要运行」。
 4. 选择安装目录（默认 `C:\KarenBot`），界面选择 **GUI** 或 **WebUI**。
@@ -146,9 +146,9 @@ Windows 原生 GUI 使用预构建的 GTK4 便携运行时，不需要自己安�
 
 ```bash
 curl -fL \
-  https://github.com/CN-BI5UNF/KarenBot-Installer/releases/download/v1.1.1/install.sh \
+  https://github.com/CN-BI5UNF/KarenBot-Installer/releases/download/v1.1.2/install.sh \
   -o install.sh
-KAREN_INSTALLER_REF=v1.1.1 bash install.sh
+KAREN_INSTALLER_REF=v1.1.2 bash install.sh
 ```
 
 然后按菜单选择：
@@ -161,10 +161,10 @@ KAREN_INSTALLER_REF=v1.1.1 bash install.sh
 
 ```bash
 # WebUI
-KAREN_INSTALLER_REF=v1.1.1 bash install.sh --online --frontend webui --dir ~/.local/opt/karenbot
+KAREN_INSTALLER_REF=v1.1.2 bash install.sh --online --frontend webui --dir ~/.local/opt/karenbot
 
 # 原生 GUI
-KAREN_INSTALLER_REF=v1.1.1 bash install.sh --online --frontend gui --dir ~/.local/opt/karenbot
+KAREN_INSTALLER_REF=v1.1.2 bash install.sh --online --frontend gui --dir ~/.local/opt/karenbot
 ```
 
 如果 `raw.githubusercontent.com` 访问不稳定，安装器 README 提供了多镜像一行式命令：
