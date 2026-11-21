@@ -1,0 +1,12 @@
+[submodule "modules/KarenBot-backend"]
+	path = modules/KarenBot-backend
+	url = https://github.com/CN-BI5UNF/KarenBot-backend.git
+	branch = main
+[submodule "modules/KarenBot-GUI"]
+	path = modules/KarenBot-GUI
+	url = https://github.com/CN-BI5UNF/KarenBot-GUI.git
+	branch = main
+[submodule "modules/KarenBot-WebUI"]
+	path = modules/KarenBot-WebUI
+	url = https://github.com/CN-BI5UNF/KarenBot-WebUI.git
+	branch = main

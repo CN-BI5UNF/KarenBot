@@ -1,0 +1,88 @@
+name: Release KarenBot
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish, e.g. v2.0.0-alpha"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve release tag
+        id: vars
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          case "$tag" in
+            *-alpha*|*-beta*|*-rc*) echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Verify submodule lock
+        run: python scripts/verify_modules.py --tag "${{ steps.vars.outputs.tag }}"
+
+      - name: Build component assets
+        run: python scripts/build_release_assets.py --tag "${{ steps.vars.outputs.tag }}" --output dist
+
+      - name: Validate manifest and archives
+        run: |
+          python - <<'PY'
+          import json, tarfile
+          from pathlib import Path
+          tag = "${{ steps.vars.outputs.tag }}"
+          manifest = json.loads(Path("dist/modules.json").read_text(encoding="utf-8"))
+          assert manifest["schema"] == 1
+          assert manifest["release"] == tag
+          for component, item in manifest["components"].items():
+              path = Path("dist") / item["asset"]
+              assert path.is_file(), path
+              assert path.stat().st_size == item["size"]
+              with tarfile.open(path, "r:gz") as archive:
+                  names = archive.getnames()
+              assert any(name.startswith(item["asset"].removesuffix(".tar.gz") + "/") for name in names)
+              print(component, item["asset"], item["size"])
+          PY
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          PRERELEASE: ${{ steps.vars.outputs.prerelease }}
+        shell: bash
+        run: |
+          notes="releases/$TAG.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/modules.json dist/*.tar.gz --clobber
+          else
+            args=("$TAG" dist/modules.json dist/*.tar.gz --title "KarenBot $TAG")
+            if [ -f "$notes" ]; then
+              args+=(--notes-file "$notes")
+            else
+              args+=(--notes "KarenBot $TAG")
+            fi
+            if [ -n "$PRERELEASE" ]; then
+              args+=("$PRERELEASE")
+            fi
+            gh release create "${args[@]}"
+          fi

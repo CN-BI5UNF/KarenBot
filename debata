@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# 旧命令兼容入口；新命令请使用 ./karen。
-set -euo pipefail
-export KAREN_LEGACY_SERVICE=1
-exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/karen" "$@"

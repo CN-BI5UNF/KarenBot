@@ -1,0 +1,40 @@
+name: Verify Umbrella
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify submodule lock
+        run: python scripts/verify_modules.py
+
+      - name: Validate assembly inputs
+        run: python scripts/assemble.py --check
+
+      - name: Compile scripts
+        run: python -m compileall -q scripts tests
+
+      - name: Install test tool
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run umbrella tests
+        run: python -m pytest tests -q
