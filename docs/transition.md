@@ -24,7 +24,7 @@ v2 把后端、GUI、WebUI 合并成 KarenBot 主仓库的统一发行版。由�
 
 过渡版更新页会从 `CN-BI5UNF/KarenBot` 读取发行版：
 
-- `v2.0.0-alpha.1` 是 **Pre-release**，不会自动提示；
+- `v2.0.1-alpha` 是 **Pre-release**，不会自动提示；
 - 在「更新 → KarenBot 发行版」中手动选择；
 - 可同时更新后端与当前前端，也可只更新其中一个组件；
 - 更新后后端有变化则重启后端；GUI 完全退出重开，WebUI 刷新页面。

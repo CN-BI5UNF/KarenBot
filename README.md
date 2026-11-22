@@ -8,7 +8,7 @@ KarenBot 是一个可以长期运行在你自己电脑或服务器上的角色�
 
 项目完全本地部署，模型请求直接发送给你配置的提供商；聊天记录、人格、密钥和知识库都保存在本机。
 
-- 最新发行版：**v2.0.0-alpha.1**
+- 最新发行版：**v2.0.1-alpha**
 - 支持平台：Windows 10/11 x64、Linux（x64 / arm64）
 - 两种界面：原生 **GTK4 GUI** / 浏览器 **WebUI**
 - 许可证：Apache-2.0
@@ -44,7 +44,7 @@ KarenBot 由三部分组成：
 |---|---|
 | **Backend** | 核心运行时、人格 Agent、记忆、工具、适配器和控制 API |
 | **GUI** | 原生 GTK4 / libadwaita 桌面控制台 |
-| **WebUI** | 浏览器控制台，可在局域网内用手机/平板访问 |
+| **WebUI** | 浏览器控制台，默认仅本机；可在设置中开启局域网访问后用手机/平板打开 |
 
 两个前端共用同一套后端控制面，所以功能、配置和状态保持一致。你可以只安装其中一个，也可以两个都安装。
 
@@ -251,7 +251,10 @@ GUI 会在本机回环地址启动后端，并用随机令牌连接；不需要�
 ~/.local/opt/karenbot/launch-webui.sh
 ```
 
-默认只监听本机。需要在局域网访问时，按启动日志/设置页提示配置监听地址和访问令牌，不要把控制面直接暴露到公网。
+默认只监听本机。需要在局域网访问时，打开 WebUI 的 **设置 → 网络**，
+启用“允许暴露在局域网中”并重启 WebUI；也可以在 `config.yaml` 设置
+`webui.allow_lan: true`，或启动时显式加 `--host 0.0.0.0`。开启后仍然需要
+访问令牌，不要把控制面直接暴露到公网。
 
 ### Headless / 服务器
 
@@ -316,7 +319,7 @@ cd KarenBot
 git submodule update --init --recursive
 
 # 校验版本锁定
-python scripts/verify_modules.py --tag v2.0.0-alpha.1
+python scripts/verify_modules.py --tag v2.0.1-alpha
 
 # 组装一个可运行目录（只含 tracked files）
 python scripts/assemble.py --frontend webui --output dist/app
@@ -365,7 +368,7 @@ GUI 在 Linux 上还需要系统 GTK4/PyGObject；Windows 开发请使用安装�
 1. 后端 `v0.1.11-alpha.1`；
 2. GUI/WebUI `v0.1.1-alpha.2`；
 3. 重启应用；
-4. 在更新页手动选择最新 v2 发行版（当前为 `v2.0.0-alpha.1`）。
+4. 在更新页手动选择最新 v2 发行版（当前为 `v2.0.1-alpha`）。
 
 详见 [`docs/transition.md`](docs/transition.md)。
 
@@ -407,7 +410,9 @@ GUI 在 Linux 上还需要系统 GTK4/PyGObject；Windows 开发请使用安装�
 
 **WebUI 打不开**
 
-确认启动日志中的监听地址和端口；默认只监听本机。局域网访问需要调整监听地址并设置访问令牌。
+确认启动日志中的监听地址和端口；默认只监听本机。局域网访问需要在
+**设置 → 网络** 开启“允许暴露在局域网中”并重启 WebUI，或显式用
+`--host 0.0.0.0` 启动；开启后仍需要访问令牌。
 
 **QQ 没有反应**
 
@@ -423,7 +428,8 @@ GUI 在 Linux 上还需要系统 GTK4/PyGObject；Windows 开发请使用安装�
 
 | 版本 | 状态 |
 |---|---|
-| `v2.0.0-alpha.1` | 最新发行版（支持后端/前端分开更新，预览版） |
+| `v2.0.1-alpha` | 最新发行版（WebUI 局域网开关、快捷方式图标修复、工具档位移位） |
+| `v2.0.0-alpha.1` | 上一版（支持后端/前端分开更新） |
 | `v0.1.x` 模块线 | 需过渡补丁升级到 v2 |
 | `v1.0.x` 绑定版 | 已停止支持，仅保留归档 |
 
