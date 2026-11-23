@@ -123,34 +123,37 @@ KarenBot 可以在启动时拉起多个外部程序，例如 NapCat、SnowLuma�
 
 ## 安装
 
-推荐使用官方安装器。安装器不内置应用包，会在线读取 KarenBot 主仓库的发行版清单，校验 SHA256 后组合安装。
+推荐使用官方 **[KarenBot Installer v2.0.0-alpha（Latest）](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/latest)**。
+安装器与 KarenBot 应用分别发布；当前应用版本为 `v2.1.0-alpha`。
+安装器会下载并校验所需的应用组件或 Windows GUI 便携包。
 
 ### Windows 10/11（x64）
 
-1. 打开安装器 Release：
+1. 下载 Latest 安装器：
 
-   <https://github.com/CN-BI5UNF/KarenBot-Installer/releases>
+   [KarenBot-Installer.exe](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/latest/download/KarenBot-Installer.exe)
 
-2. 下载 `KarenBot-Installer.exe`：
+2. 双击运行，无需预装 Python。如果 SmartScreen 提示未知发布者，确认文件来自官方 Release 后选择「更多信息 → 仍要运行」。
+3. 选择可写的纯英文短路径（默认系统盘的 `C:\KarenBot`），界面选择 **GUI** 或 **WebUI**。
+4. 来源选择 **在线安装**，等待下载和校验完成。
+5. 安装完成后从桌面 / 开始菜单启动。
 
-   <https://github.com/CN-BI5UNF/KarenBot-Installer/releases/download/v1.1.3/KarenBot-Installer.exe>
+Windows 原生 GUI 使用独立下载的 GTK4 便携包，不需要自己安装 GTK；包内应用版本
+取决于该包的构建版本，如需 `v2.1.0-alpha`，可在安装完成后进入「设置 → 更新」选择。
+Windows WebUI 按需下载便携 Python，并创建浏览器访问的启动入口。
 
-3. 双击运行。如果 SmartScreen 提示未知发布者，选择「更多信息 → 仍要运行」。
-4. 选择安装目录（默认 `C:\KarenBot`），界面选择 **GUI** 或 **WebUI**。
-5. 来源选择 **在线安装**，等待下载和校验完成。
-6. 安装完成后从桌面/开始菜单启动。
+### Linux（x64 / arm64）
 
-Windows 原生 GUI 使用预构建的 GTK4 便携运行时，不需要自己安装 GTK；WebUI 安装后会创建启动入口，用浏览器访问。
-
-### Linux
-
-最简单的安装方式是通过安装器的 `install.sh`：
+需要 Bash、curl、Python 3.10+ 和 `sha256sum`。Debian / Ubuntu 可先运行
+`sudo apt install curl python3 python3-venv`。
+在同一个终端下载并校验当前 Latest `v2.0.0-alpha` 的脚本与安装核心：
 
 ```bash
-curl -fL \
-  https://github.com/CN-BI5UNF/KarenBot-Installer/releases/download/v1.1.3/install.sh \
-  -o install.sh
-KAREN_INSTALLER_REF=v1.1.3 bash install.sh
+export KAREN_INSTALLER_REF=v2.0.0-alpha
+export KAREN_INSTALLER_SHA256=0c5fa39a5a4ac15726cd70708c2e34488703dfec067d07efdb8594b197821309
+curl -fL https://github.com/CN-BI5UNF/KarenBot-Installer/releases/download/v2.0.0-alpha/install.sh -o install.sh &&
+printf '%s  %s\n' '624538f2c167b091ee32e17cdc2c9322e3c857f94619723b1e1fd7375d759d01' install.sh | sha256sum -c - &&
+bash install.sh
 ```
 
 然后按菜单选择：
@@ -159,19 +162,19 @@ KAREN_INSTALLER_REF=v1.1.3 bash install.sh
 - 界面：`GUI` 或 `WebUI`；
 - 安装目录（默认 `~/.local/opt/karenbot`）。
 
-也可以直接传参，跳过交互菜单：
+也可以在同一个终端直接传参，明确安装 KarenBot `v2.1.0-alpha`：
 
 ```bash
 # WebUI
-KAREN_INSTALLER_REF=v1.1.3 bash install.sh --online --frontend webui --dir ~/.local/opt/karenbot
+bash install.sh --online --frontend webui --tag v2.1.0-alpha --dir ~/.local/opt/karenbot
 
 # 原生 GUI
-KAREN_INSTALLER_REF=v1.1.3 bash install.sh --online --frontend gui --dir ~/.local/opt/karenbot
+bash install.sh --online --frontend gui --tag v2.1.0-alpha --dir ~/.local/opt/karenbot
 ```
 
-如果 `raw.githubusercontent.com` 访问不稳定，安装器 README 提供了多镜像一行式命令：
+GitHub 访问不稳定时，使用安装器 README 的多镜像下载与哈希校验命令：
 
-<https://github.com/CN-BI5UNF/KarenBot-Installer#linux-一行式安装cli>
+[多镜像安装说明](https://github.com/CN-BI5UNF/KarenBot-Installer#github-访问不稳定时)
 
 Linux 原生 GUI 需要系统安装 GTK4、libadwaita 和 PyGObject：
 
@@ -182,11 +185,16 @@ sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
 
 只使用 WebUI 则不需要 GTK。
 
+Linux 桌面用户也可下载 Latest 的
+[x64 图形安装器](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/latest/download/KarenBot-Installer-linux-x64)
+或 [arm64 图形安装器](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/latest/download/KarenBot-Installer-linux-arm64)，
+执行 `chmod +x` 后在桌面会话中运行；服务器 / SSH 使用上面的 CLI。
+
 ### 安装器会做什么
 
-1. 解析 KarenBot 最新统一发行版（`modules.json`）；
-2. 下载 **后端 + 你选择的前端** 组件包；
-3. 校验大小和 SHA256；
+1. Linux / Windows WebUI 按 `--tag` 或主仓库 Release feed 解析统一发行版（`modules.json`）；
+2. 下载 **后端 + 你选择的前端**；Windows GUI 下载预构建的便携应用包；
+3. 按发行清单校验大小和 SHA256（Windows GUI 使用 `SHA256SUMS.txt`）；
 4. 解压并组合成应用目录；
 5. 从 KarenBot 主仓库补齐默认人格；
 6. 创建虚拟环境、安装 Python 依赖（Windows 便携包跳过）；
