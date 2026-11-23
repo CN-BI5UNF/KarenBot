@@ -1,32 +1,41 @@
 # KarenBot
 
-> A long-running local character chat agent with personas, long-term memory, tools, and QQ/Telegram integrations.
+> A local character chat agent that remembers, acts, and keeps you company over the long run.
 
-KarenBot began as a rework of [Debata_Agent](https://github.com/binglang001/Debata_Agent) and now ships as an independent v2 unified distribution.
+| Quick access | Link |
+|---|---|
+| **简体中文 README** | [README.md](README.md) |
+| **Current release** | [v2.1.0-alpha](https://github.com/CN-BI5UNF/KarenBot/releases/tag/v2.1.0-alpha) |
+| **Official installer** | [KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha) |
+| **Release notes** | [releases/](releases/) |
+| **Issues** | [GitHub Issues](https://github.com/CN-BI5UNF/KarenBot/issues) |
+| **Distribution and upgrades** | [Distribution contract](docs/distribution.md) / [Legacy upgrade path](docs/transition.md) |
 
-It is a character-chat framework built to run for a long time on your own computer or server. LLM providers, persona prompts, long-term memory, QQ/Telegram integrations, tool use, and a visual control console all live in one runtime — so a character does more than answer questions. It remembers your conversations, reaches for tools when they help, looks things up, sends images, joins group chats, and builds up its own context over time.
+Supports Windows 10/11 x64 and Linux (x64 / arm64); licensed under Apache-2.0.
 
-Everything is local-first: chat history, personas, keys, and knowledge stay on your machine, and model requests go only to the providers you configure.
+KarenBot began as a rework of [Debata_Agent](https://github.com/binglang001/Debata_Agent) and is now a character-chat framework built to run for a long time on a personal computer or server. It combines an LLM runtime, personas, a background mind, long-term memory, QQ/Telegram integrations, tool use, and a visual control console in one application. A character does more than answer questions: it remembers what you told it, adjusts tone by relationship, joins group conversations, looks things up, sends images, writes files, and can even enter a controlled container to finish a task.
 
-- Current application release: [**v2.1.0-alpha**](https://github.com/CN-BI5UNF/KarenBot/releases/tag/v2.1.0-alpha)
-- Official installer: [**v2.0.0-alpha**](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha)
-- Supported platforms: Windows 10/11 x64, Linux (x64 / arm64)
-- Frontends: native **GTK4 GUI** / browser **WebUI**
-- License: Apache-2.0
+Everything is local-first: chat history, personas, keys, knowledge, and workspaces stay on your machine, and model requests go only to the providers you configure.
 
-> v2 is a unified distribution: the backend and the selected frontend are released and updated together, though either component can also be updated alone from the Updates page. `v2.1.0-alpha` is the current release but is still an alpha preview; interfaces and data formats may change, so back up before upgrading.
-
-[简体中文 README](README.md)
+> `v2.1.0-alpha` is the current release but is still an alpha preview; interfaces and data formats may change, so back up before upgrading. v2 is a unified distribution: the backend and the selected frontend update together, though either component can also be updated alone from the Updates page.
 
 ---
 
 ## Contents
 
 - [What KarenBot is](#what-karenbot-is)
-- [Features](#features)
+- [Feature overview](#feature-overview)
+- [Human-like conversation](#human-like-conversation)
+- [Personas and background mind](#personas-and-background-mind)
+- [Memory, knowledge, and slang](#memory-knowledge-and-slang)
+- [Chat platforms and group management](#chat-platforms-and-group-management)
+- [Models and multi-agent](#models-and-multi-agent)
+- [Tools, workspace, and coding agents](#tools-workspace-and-coding-agents)
+- [Emoji and multimodal](#emoji-and-multimodal)
+- [Two consoles](#two-consoles)
 - [Installation](#installation)
 - [First run](#first-run)
-- [Running](#running)
+- [Running day to day](#running-day-to-day)
 - [Requirements](#requirements)
 - [Repository layout](#repository-layout)
 - [Development and builds](#development-and-builds)
@@ -46,7 +55,7 @@ KarenBot consists of three components that can be combined as needed:
 
 | Component | Role |
 |---|---|
-| **Backend** | Core runtime: persona agents, memory, tools, adapters, and the control API |
+| **Backend** | Core runtime: persona agents, background mind, memory, tools, adapters, and the control API |
 | **GUI** | Native GTK4 / libadwaita desktop console |
 | **WebUI** | Browser console, local-only by default; enable LAN access to use it from a phone or tablet |
 
@@ -54,23 +63,87 @@ Both frontends share the same backend control plane, so configuration, state, an
 
 It fits scenarios like these:
 
-- a private AI character with long-term memory and a stable personality;
-- a character that joins QQ groups or Telegram chats and takes part in everyday conversation;
-- a character that can search, recognize images, speak, consult a knowledge base, and manage group chats;
-- long-running deployments on a personal machine or small server, with all data under your control;
-- custom play through plugins and your own personas.
+- a private AI character with long-term memory, a stable personality, and the ability to start conversations;
+- a character that joins QQ groups or Telegram chats, takes part in everyday conversation, and helps manage the group;
+- a character that can search, recognize images, consult knowledge, send emoji, and speak;
+- a character that can read and write files, run commands, and complete coding tasks in a controlled environment;
+- long-running deployments on a personal machine or small server, with all data under your control.
 
-## Features
+## Feature overview
 
-### Personas and memory
+| Capability | What you get |
+|---|---|
+| **Human-like conversation** | Replies split into multiple short messages, tone that shifts by relationship, proactive thinking, pre-send review, and interruption handling |
+| **Personas and background mind** | Multiple personas, age brackets, energy/satiety/mood, sleep and eating, work state, and admin wake-up |
+| **Long-term memory** | File-based or RAG memory with global/person/group scopes and pinned entries |
+| **Knowledge and slang** | Web-researched knowledge notes, on-demand group slang, deduplication, and read-only sharing |
+| **Group management** | Allow/deny lists, per-group @ trigger windows, chat receive scope, group admin tools, stranger rate limits |
+| **Model access** | 14 built-in providers, any OpenAI/Anthropic-compatible relay, and per-agent model binding |
+| **Tools** | 15 toolsets, an AI workspace, coding agents, a controlled Docker container, and external program hosting |
+| **Multimodal** | Emoji, character images, vision, and speech synthesis |
+| **Two consoles** | A GTK4 GUI and a WebUI with 15 pages each, token auth, and mostly hot-applied settings |
+| **Deployment and updates** | Official installer, unified releases, component-level updates and rollback, automatic backups, and SHA256 verification |
 
-- **Multiple personas**: a built-in default persona plus your own created or imported characters; each persona has its own prompt, knowledge, and chat context.
-- **Long-term memory**: conversation history, important memories, RAG retrieval, and archived storage, so a character can remember information across sessions.
-- **Persona work state**: a character can enter a "work" state and temporarily switch to a tool profile better suited to tasks.
-- **Knowledge and slang**: per-persona knowledge entries, group slang, and world details, kept isolated from each other.
-- **Character imagery**: multiple character images, previews, and image sending.
+## Human-like conversation
 
-### Chat platforms
+KarenBot aims for a character that participates in chat, not a customer-service bot.
+
+- **Multi-bubble replies**: a single reply can be split into several messages, sent in order with a configurable delay between them, so short lines, follow-ups, and emoji arrive separately instead of as one wall of text.
+- **Relationship-aware tone**: a character can tease close friends, speak respectfully to elders, and stay polite but distant with strangers; persona prompts and user profiles both shape the wording.
+- **Natural rhythm**: rapid consecutive messages are merged before processing; characters can digress, change their mind, forget things, or choose not to reply.
+- **Proactive thinking**: a background loop can periodically decide whether to speak first (about every 10 minutes by default, configurable); it does not run unless a proactive-thinking model is configured.
+- **Pre-send review**: the send tool checks for newer, higher-priority messages and can pause or replace a reply so stale content is not delivered.
+- **Interruption policies**: per-conversation policies can interrupt on any new message, only on high-priority messages, or use atomic delivery, matching casual chat, long replies, and fixed notifications.
+- **Stranger rate limits**: non-friends are rate-limited by default; friends and admins are exempt.
+- **No-channel trial mode**: without QQ/Telegram, the Runtime still starts in no-channel mode, and the conversation page can inject simulated inbound messages to test personas and tools.
+
+## Personas and background mind
+
+A persona is more than a static prompt; it is a continuously maintained character state.
+
+- **Multiple personas**: a built-in default plus your own created, copied, or ZIP-imported personas; each has its own prompt, knowledge, slang context, and chat history.
+- **AI-assisted authoring**: generate a persona from a short description, rewrite it iteratively, edit the prompt directly, or inspect the persona source read-only.
+- **Age and physiology**: age brackets and age hints, with energy, satiety, mood, and social needs tracked; different age brackets can configure different energy decay, sleep duration, and mood volatility.
+- **Sleep, eating, and collapse**: characters can sleep and eat on their own; when energy runs out they enter a collapse state, and waking or finishing a meal triggers a model-based recovery assessment with a formula fallback.
+- **Background maintenance**: the persona-management agent periodically organizes events, chat scenes, current state, user profile, short-term effects, clues, todos, and long-term memories into structured context for the main chat agent.
+- **Work state**: a character can call `work` to enter work mode for long tasks in a container; private messages and group mentions are queued, ordinary group messages are only recorded, and everything is processed together afterwards. The maximum work duration is configurable, and 0 disables the state.
+- **Admin wake-up**: when a persona is sleeping or collapsed, an admin can leave a wake-up line in the persona console; the response appears only in the wake-up card and is never sent to QQ automatically.
+- **Character images**: each persona can keep multiple appearance images, choose a preview image, and send images through `persona-image:` references.
+
+## Memory, knowledge, and slang
+
+### Long-term memory
+
+- Remembers promises, appointments, preferences, and identity details across sessions;
+- Each memory has a scope (global / person / group) and a pinned flag;
+- **File mode**: plain JSON, zero configuration, fully transparent, suitable for one-on-one chat;
+- **RAG mode**: background extraction and vector indexing with semantic retrieval, suitable for many groups and users over time;
+- The memory page supports viewing, editing, manual additions, import, and export.
+
+### History and archives
+
+- Rolling summaries compress old conversations into long-term memory;
+- Conversations and groups can be summarized, and archived records filtered and searched;
+- The model can look back at recent messages or older archives on demand instead of stuffing all history into context.
+
+### Knowledge and memes
+
+- The model can use `web_search` to research a topic, then save verified findings as knowledge notes;
+- Each note carries source, type, and confidence; only `active` entries are returned by `list_knowledge_notes`;
+- Notes are not injected into every turn; the model queries them on demand, preserving KV-cache hits;
+- A background task can research current internet memes on a schedule, with configurable search terms and note limits;
+- Notes are deduplicated by title and topic, with `/api/knowledge/dedupe` to preview and merge duplicates;
+- Knowledge can be shared per entry; other personas get read-only access while the owner keeps edit and delete rights;
+- Web text is treated as untrusted data: escaped, truncated, and explicitly marked as instructions not to follow.
+
+### Group slang
+
+- Learns abbreviations, catchphrases, and in-jokes per group; candidates take effect only after an admin confirms them on the Slang page;
+- Only confirmed entries can be queried by `lookup_slang`; candidates, evidence, and other groups' entries never leak to the model;
+- Entries are shared by all personas in the same group and strictly isolated across groups;
+- Slang is not injected into every turn; the model looks it up only when it encounters an unfamiliar term.
+
+## Chat platforms and group management
 
 NapCat is one implementation in the QQ/OneBot 11 ecosystem, not the only platform KarenBot supports. The current protocol catalog:
 
@@ -81,54 +154,162 @@ NapCat is one implementation in the QQ/OneBot 11 ecosystem, not the only platfor
 | **QQ Official Bot API v2** | Planned | Protocol documentation and configuration contracts exist, but no usable adapter ships in this version. |
 | **Satori v1** | Planned | Intended to bridge Discord, Telegram, Feishu, and other platforms through a Satori server; no usable adapter ships in this version. |
 
-The OneBot 11 adapter offers a strict standard mode (`onebot11`) and a NapCat extension-compatible mode (`napcat`); when the connected implementation lacks an extension, KarenBot degrades gracefully.
+> A Runtime currently runs one primary adapter; if several are configured, only the first enabled one is used and the rest are ignored. With no adapter enabled, the Runtime starts in no-channel mode and local features remain available.
 
-- **Structured messages**: text, mentions, replies, images, voice, video, files, reactions, and forwarded messages are normalized into message segments.
-- **Group chat control**: allow/deny lists, group trigger rules, group receive selection, and group management tools.
+### OneBot 11
 
-### Models and tools
+- Strict standard mode `onebot11` and NapCat extension-compatible mode `napcat`;
+- Forward WebSocket, reverse WebSocket, HTTP API, and HTTP POST Webhook;
+- Reverse WS supports multiple accounts and routes messages by `self_id`;
+- Webhook supports HMAC-SHA1 signature verification;
+- When an implementation lacks an extension, KarenBot degrades gracefully.
 
-- OpenAI-compatible endpoints, Anthropic, Google Gemini, and other providers;
-- models bound per persona, with separate main, vision, Embedding, and TTS models;
-- built-in tools for sending messages, group management, search, vision, voice, knowledge bases, and RAG memory;
-- optional controlled Docker containers and a coding-agent mode;
-- a plugin system for backend plugins and new frontend modules.
+### Messages and groups
+
+- **Structured messages**: text, mentions, replies, images, voice, video, files, reactions, and forwarded messages become message segments;
+- **Allow/deny lists**: inbound policy supports `open` / `verify` / `whitelist`; blacklist hits are dropped first, ahead of the whitelist;
+- **Per-group @ triggers**: listed groups respond only when mentioned, with configurable consecutive-message counts, time windows, and filter-cache size;
+- **Chat receive scope**: the model can use `chat_selection` to pause group messages, receive only selected groups, or restore normal delivery; mentions always pass;
+- **Group admin tools**: kick, mute, whole-group mute, leave, friend requests, and group join request approval;
+- **Group trigger window tools**: the model can open, extend, or close a group window and look back at filtered messages.
+
+## Models and multi-agent
+
+### Providers
+
+Fourteen built-in provider presets:
+
+Anthropic Claude, DeepSeek, Google Gemini, Zhipu GLM, Groq, Xiaomi MiMo, Moonshot Kimi, OpenAI, OpenRouter, Qwen, SiliconFlow, Together, Volcengine Ark, and xAI.
+
+You can also connect any OpenAI / Anthropic-compatible endpoint or relay:
+
+- Add a provider under **Model management → Add provider** with its base URL, API key, and model name;
+- Test the connection and fetch the model list;
+- Optionally declare the upstream model vendor for vision, video, and context capability tables;
+- Choose a thinking-parameter style per provider so relay gateways do not reject vendor-specific fields;
+- Drop custom presets into `providers/presets/` in the data directory.
+
+### Multi-agent roles
+
+The main chat, proactive thinking, rolling summary, and persona-generation agents can bind different models. For example, use a strong model for chat and small models for proactive checks and summaries; unconfigured roles fall back safely to the chat or proactive model.
+
+### Reasoning and multimodal
+
+- Thinking modes expose low/medium/high or more granular levels depending on the model;
+- **Vision**: use native image input on the main model, or configure a separate `describe_image` vision model;
+- **Embedding**: API services or local models for RAG memory;
+- **TTS**: EdgeTTS (free), iFlytek, or local VoxCPM2;
+- **Images and video**: configurable byte, pixel, per-message count, and request-body limits.
+
+### Token efficiency
+
+- Only old context sent to the model is trimmed; history, archives, and the event store remain intact;
+- Tool schemas support `compact`, `full`, `routed`, and `agent` profiles, loading tools as needed;
+- High-frequency tools are exposed directly; low-frequency or high-risk tools are queried through `tool_search`;
+- Request counts, input/output/thinking tokens, and KV hit rate are tracked and calibrated per provider/model.
+
+## Tools, workspace, and coding agents
+
+### Toolsets
+
+Tools are organized into 15 toolsets that can be loaded as a group or searched individually:
+
+| Toolset | Capability |
+|---|---|
+| `core` | Replying, ending a turn, basic memory/knowledge, vision, @ trigger windows, and routing entry points |
+| `control` | Scheduled wake-ups, chat receive scope, group trigger windows, tool search |
+| `messaging` | Private/group sending, recall, file upload, voice messages |
+| `qq_info` | Contacts, group members, message lookup, poke, reactions |
+| `qq_admin` | Kick, mute, whole-group mute, leave, friend/group request approval |
+| `history` | Recent messages, conversation summaries, archive filtering and search |
+| `memory` | Save, update, and delete long-term memories |
+| `knowledge` | Knowledge notes, web research, deletion of stale notes |
+| `slang` | Query confirmed slang and in-jokes for the current group |
+| `web` | Web search, page fetching, weather |
+| `emoji` | List, save, rename, and delete emoji |
+| `workspace` | Local workspace read/write, Python execution, file upload, background tasks |
+| `persona` | Eating, sleeping, and autonomous work state |
+| `coding` | Read/write/edit, patches, commands, glob/grep, subagents, plan mode, custom tools |
+| `container` | Execute commands and read/write `/workspace` inside a controlled Docker container |
+
+### AI workspace
+
+- Read, write, edit, and delete files in the local workspace;
+- Run Python and upload files to QQ;
+- Read PDF, DOCX, XLSX, and other documents users send;
+- Start background agent tasks that run outside the chat loop.
+
+### Coding agents
+
+Coding tools are KarenBot's own tool semantics; they do not launch third-party TUIs or GUIs:
+
+- **Host**: always uses Claude Code semantics, scoped to the AI workspace;
+- **Container**: install and activate one of Pi, DSH, or Claude Code at a time;
+- Supports read/write/edit, unified diff patches, commands, glob/grep, todos, plan mode, subagents, Jupyter cells, and custom tools;
+- Entering work state temporarily switches the persona to a coding-oriented tool profile.
+
+### Controlled Docker container
+
+- No network by default, `cap-drop ALL`, `no-new-privileges`, non-root, read-only root filesystem, and only `/workspace` writable;
+- Memory, CPU, pids, per-file size, output, and timeouts are configurable;
+- Storage supports B (Docker named volume with a soft quota, the default, no admin required) and C (fixed-size filesystem image with a hard limit, requiring one-time admin mounting);
+- The container page provides a read-only file manager with local-workspace and container-workspace modes;
+- Changing resource limits does not force a rebuild; new settings apply after an explicit rebuild;
+- A Docker image mirror prefix can be configured, and missing images are pulled in the background at startup.
 
 ### External program hosting
 
-KarenBot can start companion programs such as NapCat, SnowLuma, proxies, or other dependencies at launch:
+KarenBot can start NapCat, LLOneBot, proxies, or other dependencies at launch:
 
-- custom name, executable, arguments, working directory, and environment variables;
-- port probing: if something already serves the port, startup is skipped and the existing process is never killed;
-- optional automatic restart;
-- "stop with KarenBot" only stops processes that KarenBot successfully started;
-- a failed program is logged and reported without affecting KarenBot itself.
+- Custom name, executable, arguments, working directory, and environment variables;
+- Port probing: if something already serves the port, startup is skipped and the existing process is never killed;
+- Optional automatic restart and startup wait time;
+- "Stop with KarenBot" only stops processes that KarenBot successfully started;
+- A failed program is logged and reported without affecting the main application;
+- Configuration is hot-applied: new or enabled entries start immediately, removed or disabled entries stop immediately.
 
-### Two frontends
+## Emoji and multimodal
 
-**GUI**: a native GTK4 window for long desktop sessions.
+- Put emoji files in `data/emoji/`; the model picks and sends them based on conversation mood;
+- The WebUI/GUI supports drag-and-drop, multi-select upload, per-file renaming, thumbnails, renaming, and deletion;
+- PNG / JPG / JPEG / GIF are supported, up to 5 MB each; duplicate names get a `_1` suffix;
+- The model can list emoji, save one from a group message or a URL, rename it, and delete it;
+- QQ native faces are mapped to Chinese names, for example `[CQ:face,id=5]` displays as "流眼泪" and can be sent by name;
+- Character appearance images are managed separately from emoji and can be sent to users or inspected by the vision model;
+- Voice messages are synthesized through TTS, with cloud and local options.
 
-- Overview, conversations, memory, personas, knowledge, slang, models, logs, containers, storage, allow/deny lists, group triggers, and settings;
-- themes, font scaling, and render fallback;
-- connects to the backend over loopback HTTP with a random token, never exposed publicly.
+## Two consoles
 
-**WebUI**: browser access for servers, phones, and tablets.
+### GUI
 
-- pages and settings aligned with the GUI;
-- login token and hash routing;
-- opens directly in a browser on the local network;
-- files are primarily downloaded or previewed in the browser.
+A native GTK4 / libadwaita desktop console for long desktop sessions.
 
-### Runtime and updates
+- 15 pages: Overview, Chats, Memory, Persona mind, Logs, Personas, Slang, Knowledge, Models, Emoji, Container, Storage & data, Allow/deny lists, Group triggers, and Settings;
+- Follows the system theme or switches manually, with font scaling and render fallback;
+- Starts the backend on loopback with a per-process random Bearer token, never exposed publicly;
+- Automatically falls back to Cairo software rendering if GPU rendering fails.
 
-- v2 uses the **KarenBot unified distribution**: backend + current frontend updated as a set;
-- every file is backed up before an update, and failures roll back as a whole;
-- only program files are replaced; user data such as `data/`, `personas/`, `plugins/`, and `config.yaml` is left untouched;
-- pre-releases can be selected manually, with an explicit risk notice.
+### WebUI
+
+A browser console for servers, phones, and tablets.
+
+- The same 15 pages and settings as the GUI;
+- Login token exchanged for an HttpOnly session cookie, valid for 30 days by default;
+- Local-only by default; LAN access can be enabled under **Settings → Network**;
+- Dark/light themes and a sidebar that collapses to icons;
+- The conversation page supports live refresh, record filtering, attachment preview, and simulated inbound messages;
+- Storage & data provides cache inventory, cleanup previews, context compaction, persona runtime data cleanup, and local uninstall.
+
+### Shared backend
+
+- Both frontends use the same FastAPI control plane and Runtime, so features never diverge;
+- Settings pages are generated from a declarative field table, and most options apply immediately;
+- Structural fields such as container storage mode and memory/Embedding mode are explicitly marked "restart required";
+- GUI and WebUI show the same save states: "saved and applied", "Runtime restart required", or "restart pending".
 
 ## Installation
 
-The recommended path is the official **[KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha)**. The installer and the application are released separately; the Linux commands below pin application `v2.1.0-alpha`. The installer downloads, verifies, and assembles the required components, while Windows GUI uses a prebuilt portable bundle.
+The recommended path is the official **[KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha)**. The installer and the application are released separately; the Linux commands below pin application `v2.1.0-alpha`.
 
 ### Windows 10/11 (x64)
 
@@ -193,7 +374,7 @@ from the installer release, `chmod +x` it, and run it in a desktop session. Serv
 
 ### What the installer does
 
-1. Resolves the unified distribution (`modules.json`) from `--tag` or the main repository's release feed — for Linux and Windows WebUI alike;
+1. Linux and Windows WebUI resolve the unified distribution (`modules.json`) from `--tag` or the main repository's release feed;
 2. downloads the **backend + your selected frontend**; Windows GUI downloads a prebuilt portable application package;
 3. verifies sizes and SHA256 values against the release manifest (Windows GUI uses `SHA256SUMS.txt`);
 4. extracts and assembles the application directory;
@@ -205,37 +386,21 @@ The `data/` directory inside the install location holds runtime data. It is pres
 
 ## First run
 
-The first launch opens a setup wizard with three typical steps:
+The first launch opens a step-by-step wizard; the desktop version first asks for a data directory, and the remaining steps are:
 
-### 1. Configure a model provider
+1. **Main model**: enter the API URL, API key, and model name, choosing a preset or a custom endpoint;
+2. **Sub-agents**: on the custom path, optionally bind models for proactive thinking, rolling summaries, and persona generation;
+3. **Optional features**: vision, web search, weather, and TTS;
+4. **Memory mode**: file-based or RAG; RAG requires Embedding configuration;
+5. **Chat integration**: connect NapCat / OneBot 11 through the wizard; you can skip this and start in no-channel mode;
+6. **Persona**: choose the default persona or create your own;
+7. **Summary**: review the configuration and start the Runtime.
 
-Enter the API URL, API key, and model name. KarenBot supports OpenAI-compatible endpoints, Anthropic, Gemini, relay services, and local compatible servers.
+The Telegram adapter is currently configured after installation through Settings or `config.yaml`, not in the first-run wizard.
 
-Keys are stored encrypted, not in the plain configuration file.
+Keys are stored encrypted, not in the plain configuration file. After setup, use simulated inbound messages on the conversation page to test the persona and tools before connecting QQ or Telegram.
 
-### 2. Connect a chat platform
-
-**QQ / OneBot 11**
-
-Prepare a OneBot 11 implementation such as NapCat, LLOneBot, Lagrange, or go-cqhttp, then configure KarenBot:
-
-- Forward WebSocket: enter the implementation's address;
-- Reverse WebSocket: let the implementation connect to KarenBot;
-- HTTP API / Webhook: enter the address, port, and authentication as documented by the implementation.
-
-You can also add NapCat to the **External programs** list so KarenBot starts it at launch.
-
-**Telegram**
-
-Create a bot with BotFather and enter its token in KarenBot's Telegram adapter.
-
-### 3. Choose or create a persona
-
-KarenBot ships with a default persona. Use the **Personas** page to create your own character — prompt, greeting, knowledge, and images — then bind the persona to the relevant chat account.
-
-When setup is complete, start the Runtime and open the conversation page.
-
-## Running
+## Running day to day
 
 ### GUI
 
@@ -258,9 +423,24 @@ Launch from the startup entry, or run:
 
 It listens on localhost by default. To allow LAN access, open **Settings → Network** in the WebUI, enable "Allow LAN access", and restart the WebUI. You can also set `webui.allow_lan: true` in `config.yaml`, or pass `--host 0.0.0.0` at startup. The access token is still required; never expose the control plane directly to the public Internet.
 
+### Background operation
+
+For long-running deployments, use the `karen` shortcuts:
+
+```bash
+karen start     # start
+karen stop      # stop
+karen log       # show logs
+karen enable    # enable at boot
+karen disable   # disable at boot
+```
+
+The commands prefer a systemd user service. Without a systemd user session, they fall back to a PID-file + detached-process mode; tmux, screen, and nohup also work. See the backend's
+[background running guide](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/background_running.md).
+
 ### Headless / servers
 
-The backend runs without a UI, which suits long-running server deployments. See `main.py --help` and `docs/` for the available options.
+The backend runs fully headless, which suits long-running server deployments. See `main.py --help` and the backend documentation for options.
 
 ## Requirements
 
@@ -272,6 +452,8 @@ The backend runs without a UI, which suits long-running server deployments. See 
 | Memory | 2 GB or more recommended; local models need additional memory |
 | Disk | About 1.2 GB for the GUI and 400 MB for the WebUI, including dependencies and cache headroom |
 | Network | GitHub access for installation and updates; access to your configured model provider |
+| Docker | Optional; required for the controlled container and container-based coding agents |
+| Optional components | Local TTS and Embedding need model files; TTS denoising needs FFmpeg full-shared |
 
 ## Repository layout
 
@@ -335,6 +517,17 @@ python3 -m venv .venv
 
 The GUI on Linux additionally needs system GTK4/PyGObject; for Windows development, use the installer's portable bundle or a WSL/Linux environment.
 
+Tests and checks:
+
+```bash
+# Backend tests (in the backend directory, using the project virtualenv)
+PYTHONPATH=. .venv/bin/python -m pytest -q tests
+
+# Frontend syntax checks
+python3 -m compileall -q gui
+python3 -m compileall -q webui
+```
+
 Release flow, asset contracts, and submodule verification:
 
 - [`docs/distribution.md`](docs/distribution.md)
@@ -351,7 +544,9 @@ Check the KarenBot unified distribution under **Settings → Updates** in the GU
 - a frontend-only update does not restart the backend (fully reopen the GUI or refresh the WebUI page); a backend update requires a backend restart;
 - stable releases are offered automatically; pre-releases require manual selection and risk confirmation;
 - files are backed up individually under `data/module_backups/` before updating;
-- user data, personas, plugins, and configuration are never overwritten.
+- user data, personas, plugins, and configuration are never overwritten;
+- you can roll back or switch to a specific version, with data-version, contract-epoch, and capability checks;
+- if dependency files change, dependencies are installed with the current interpreter; failures roll back the source.
 
 > Updating a single component can leave the two ends on different versions. If you hit interface errors, update the other component too, or choose "reinstall everything".
 
@@ -372,15 +567,19 @@ The old "backend + WebUI bound" release line is no longer supported. Back up you
 
 ## Data, security, and backups
 
-- Runtime data lives under `data/` in the install directory by default; configuration, keys, personas, logs, and plugins are managed from the user directory.
+- Runtime data lives under `data/` in the install directory by default; configuration, keys, personas, logs, workspaces, and plugins are managed from the user directory.
 - `config.yaml` may contain sensitive configuration; `secrets.enc` / `secrets.key` encrypt your keys and must not be shared.
+- API keys use AES-256-GCM + RSA-2048 encryption and are stored in the system keyring.
 - The control API requires a token by default and should listen only on localhost or a trusted LAN; never expose it directly to the public Internet.
+- The WebUI listens on `127.0.0.1` by default; LAN access still requires the token and should be enabled only on trusted networks.
 - The updater only writes program files and never deletes user data, but backing up before an upgrade is still recommended:
   - `data/`
   - `personas/`
   - `plugins/`
   - `config.yaml`
   - `secrets.*`
+- Settings provide one-click backup of configuration, encryption keys, chat history, RAG data, workspaces, and personas; backups contain sensitive credentials, so store them safely.
+- Cleanup, persona runtime data deletion, and local uninstall on the Storage & data page require a preview, a confirmation phrase, and a checkbox; dangerous operations do not back up by default.
 - The installer verifies SHA256 values for release assets; third-party mirrors can speed up transfers but cannot replace publisher verification.
 - Model providers receive the conversation content you send them; review each provider's data policy.
 
@@ -406,9 +605,17 @@ Check the listening address and port in the startup log; it is local-only by def
 
 First confirm that the NapCat/LLOneBot implementation is connected, then check the OneBot 11 transport type, address, port, and token in KarenBot. Send a test message from the implementation's debug tools.
 
+**The model returns 401 / an invalid key error**
+
+Re-enter the API key under **Model management** and click **Test connection**. An invalid key does not prevent the Runtime from starting, but chat requests will fail.
+
 **Can I start KarenBot before connecting QQ/Telegram?**
 
 Yes. Since `v2.0.1-alpha.1`, the Runtime enters a no-channel mode when no adapter is enabled: models, personas, memory, and local features work as usual, and enabling an adapter later restores message flow automatically.
+
+**The container fails to start**
+
+Confirm Docker is available and click **Prepare / start** on the container page. The first image pull can take several minutes; configure an image mirror prefix if the network is restricted. Storage mode C requires a one-time admin initialization and never silently degrades.
 
 **Do I need to restart after an update?**
 
@@ -433,6 +640,18 @@ See [`docs/distribution.md`](docs/distribution.md) for v2 component versions, as
 - Installer: <https://github.com/CN-BI5UNF/KarenBot-Installer>
 - Issues: <https://github.com/CN-BI5UNF/KarenBot/issues>
 - Release notes: [`releases/`](releases/)
+- Backend docs: [`KarenBot-backend/docs`](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs)
+
+Topic guides:
+
+| Document | Contents |
+|---|---|
+| [Container](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/container.md) | Docker container, storage modes, file manager, troubleshooting |
+| [Agent modes](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/agent_modes.md) | Pi / DSH / Claude Code tool semantics |
+| [Background running](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/background_running.md) | systemd, tmux, and built-in background mode |
+| [External programs](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/external_programs.md) | Startup, probing, restart, and shutdown policies |
+| [Protocols](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs/protocols) | OneBot 11, Telegram, QQ Official Bot, Satori |
+| [Feature guides](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs/feature_guides) | Vision, TTS, web search, weather, RAG, knowledge, slang |
 
 When filing an issue, please include:
 
