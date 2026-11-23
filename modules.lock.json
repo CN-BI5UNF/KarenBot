@@ -1,24 +1,24 @@
 {
   "schema": 1,
-  "release": "v2.0.1-alpha.1",
+  "release": "v2.1.0-alpha",
   "components": {
     "backend": {
       "repo": "CN-BI5UNF/KarenBot-backend",
       "path": "modules/KarenBot-backend",
-      "tag": "v2.0.1-alpha.1",
-      "commit": "a07127a69879f55bc298b0b7e42d8b62bd63585c"
+      "tag": "v2.1.0-alpha",
+      "commit": "c68c719697ff53f26a3148757804ab2637596866"
     },
     "gui": {
       "repo": "CN-BI5UNF/KarenBot-GUI",
       "path": "modules/KarenBot-GUI",
-      "tag": "v2.0.1-alpha.1",
-      "commit": "4c0ec4c678ba350c7aa971c164f3b2bf58191b06"
+      "tag": "v2.1.0-alpha",
+      "commit": "f86ab54364b4b7b7e4f8e5c2741e8d719ac68974"
     },
     "webui": {
       "repo": "CN-BI5UNF/KarenBot-WebUI",
       "path": "modules/KarenBot-WebUI",
-      "tag": "v2.0.1-alpha.1",
-      "commit": "f1285d0ad0cf24fd309663faca572e27c5ed1f20"
+      "tag": "v2.1.0-alpha",
+      "commit": "fd0edc722a3b63f2c991357dd75227f1ed7af24d"
     }
   }
 }

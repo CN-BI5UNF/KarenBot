@@ -8,7 +8,7 @@ KarenBot 是一个可以长期运行在你自己电脑或服务器上的角色�
 
 项目完全本地部署，模型请求直接发送给你配置的提供商；聊天记录、人格、密钥和知识库都保存在本机。
 
-- 最新发行版：**v2.0.1-alpha.1**
+- 最新发行版：**v2.1.0-alpha**
 - 支持平台：Windows 10/11 x64、Linux（x64 / arm64）
 - 两种界面：原生 **GTK4 GUI** / 浏览器 **WebUI**
 - 许可证：Apache-2.0
@@ -319,7 +319,7 @@ cd KarenBot
 git submodule update --init --recursive
 
 # 校验版本锁定
-python scripts/verify_modules.py --tag v2.0.1-alpha.1
+python scripts/verify_modules.py --tag v2.1.0-alpha
 
 # 组装一个可运行目录（只含 tracked files）
 python scripts/assemble.py --frontend webui --output dist/app
@@ -368,7 +368,7 @@ GUI 在 Linux 上还需要系统 GTK4/PyGObject；Windows 开发请使用安装�
 1. 后端 `v0.1.11-alpha.1`；
 2. GUI/WebUI `v0.1.1-alpha.2`；
 3. 重启应用；
-4. 在更新页手动选择最新 v2 发行版（当前为 `v2.0.1-alpha.1`）。
+4. 在更新页手动选择最新 v2 发行版（当前为 `v2.1.0-alpha`）。
 
 详见 [`docs/transition.md`](docs/transition.md)。
 
@@ -428,7 +428,8 @@ GUI 在 Linux 上还需要系统 GTK4/PyGObject；Windows 开发请使用安装�
 
 | 版本 | 状态 |
 |---|---|
-| `v2.0.1-alpha.1` | 最新发行版（无渠道启动修复） |
+| `v2.1.0-alpha` | 最新发行版（安全审计修复、跨平台稳定性和容器导出加固） |
+| `v2.0.1-alpha.1` | 上一版（无渠道启动修复） |
 | `v2.0.1-alpha` | 上一版（WebUI 局域网开关、快捷方式图标修复、工具档位移位） |
 | `v2.0.0-alpha.1` | 上一版（支持后端/前端分开更新） |
 | `v0.1.x` 模块线 | 需过渡补丁升级到 v2 |
