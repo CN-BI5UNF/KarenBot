@@ -5,7 +5,7 @@
 | 快速入口 | 链接 |
 |---|---|
 | **English README** | [README_EN.md](README_EN.md) |
-| **当前版本** | [v2.1.0-alpha](https://github.com/CN-BI5UNF/KarenBot/releases/tag/v2.1.0-alpha) |
+| **当前版本** | [v2.1.3-alpha](https://github.com/CN-BI5UNF/KarenBot/releases/tag/v2.1.3-alpha) |
 | **官方安装器** | [KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha) |
 | **更新日志** | [releases/](releases/) |
 | **问题反馈** | [GitHub Issues](https://github.com/CN-BI5UNF/KarenBot/issues) |
@@ -17,7 +17,7 @@ KarenBot 从 [Debata_Agent](https://github.com/binglang001/Debata_Agent) 演进�
 
 项目采用本地部署：聊天记录、人格、密钥、知识库和工作区都保存在你的机器上，模型请求只发送给你配置的提供商。
 
-> `v2.1.0-alpha` 是当前最新版本，但仍属 alpha 预览版，接口与数据格式可能继续调整；升级前请备份。v2 采用统一发行版，后端与所选前端成套更新，也可以在更新页单独更新其中一个组件。
+> `v2.1.3-alpha` 是当前 Latest 正式发行版（GitHub Release 标记为非预发布）。tag 保留 alpha 兼容后缀，但此版本不属于预发布版。升级前仍建议备份数据。v2 采用统一发行版，后端与所选前端成套更新，也可以在更新页单独更新其中一个组件。
 
 ---
 
@@ -309,7 +309,7 @@ KarenBot 启动时可以顺带拉起 NapCat、LLOneBot、代理或其他依赖�
 
 ## 安装
 
-推荐使用官方 **[KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha)**。安装器与应用分开发布；下文的 Linux 命令固定安装应用 `v2.1.0-alpha`。
+推荐使用官方 **[KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha)**。安装器与应用分开发布；下文的 Linux 命令固定安装应用 `v2.1.3-alpha`。
 
 ### Windows 10/11（x64）
 
@@ -322,7 +322,7 @@ KarenBot 启动时可以顺带拉起 NapCat、LLOneBot、代理或其他依赖�
 4. 安装来源选择 **在线安装**，等待下载、校验和安装完成。
 5. 完成后从桌面快捷方式或开始菜单启动即可。
 
-Windows 原生 GUI 由安装器额外下载 GTK4 便携运行包，无需自行配置 GTK；该包内置的应用版本取决于打包时间，如果希望使用 `v2.1.0-alpha`，可以在安装完成后到「设置 → 更新」中切换。Windows 版 WebUI 会按需获取便携 Python，并生成一个用浏览器打开的启动入口。
+Windows 原生 GUI 由安装器额外下载 GTK4 便携运行包，无需自行配置 GTK；该包内置的应用版本取决于打包时间，如果希望使用 `v2.1.3-alpha`，可以在安装完成后到「设置 → 更新」中切换。Windows 版 WebUI 会按需获取便携 Python，并生成一个用浏览器打开的启动入口。
 
 ### Linux（x64 / arm64）
 
@@ -344,14 +344,14 @@ bash install.sh
 - 界面：`GUI` 或 `WebUI`；
 - 安装目录（默认 `~/.local/opt/karenbot`）。
 
-如果不想走菜单，也可以在同一终端直接传入参数，把应用版本固定为 `v2.1.0-alpha`：
+如果不想走菜单，也可以在同一终端直接传入参数，把应用版本固定为 `v2.1.3-alpha`：
 
 ```bash
 # WebUI
-bash install.sh --online --frontend webui --tag v2.1.0-alpha --dir ~/.local/opt/karenbot
+bash install.sh --online --frontend webui --tag v2.1.3-alpha --dir ~/.local/opt/karenbot
 
 # 原生 GUI
-bash install.sh --online --frontend gui --tag v2.1.0-alpha --dir ~/.local/opt/karenbot
+bash install.sh --online --frontend gui --tag v2.1.3-alpha --dir ~/.local/opt/karenbot
 ```
 
 GitHub 连接不畅时，安装器 README 提供了多镜像下载与哈希校验的完整命令：
@@ -436,7 +436,7 @@ karen disable   # 取消开机自启
 ```
 
 底层优先使用 systemd 用户服务；没有 systemd 用户会话时，会自动切换到 PID 文件 + 独立进程的内置后台模式，也可以用 tmux、screen 或 nohup。详见后端仓库的
-[后台运行指南](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/background_running.md)。
+[后台运行指南](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/background_running.md)。
 
 ### Headless / 服务器
 
@@ -497,7 +497,7 @@ cd KarenBot
 git submodule update --init --recursive
 
 # 校验版本锁定
-python scripts/verify_modules.py --tag v2.1.0-alpha
+python scripts/verify_modules.py --tag v2.1.3-alpha
 
 # 组装一个可运行目录（只含 tracked files）
 python scripts/assemble.py --frontend webui --output dist/app
@@ -557,7 +557,7 @@ python3 -m compileall -q webui
 1. 后端 `v0.1.11-alpha.1`；
 2. GUI/WebUI `v0.1.1-alpha.2`；
 3. 重启应用；
-4. 在更新页手动选择最新 v2 发行版（当前为 `v2.1.0-alpha`）。
+4. 在更新页手动选择最新 v2 发行版（当前为 `v2.1.3-alpha`）。
 
 详见 [`docs/transition.md`](docs/transition.md)。
 
@@ -578,7 +578,9 @@ python3 -m compileall -q webui
   - `plugins/`
   - `config.yaml`
   - `secrets.*`
-- 设置页提供一键备份，包含配置、加密密钥、聊天记录、RAG、工作区和人格；备份包含敏感凭据，请妥善保管。
+- “设置 → 备份”可分别选择配置、凭据、聊天、RAG、工作区、表情包、Provider 预设和人格；创建前显示各类别大小，任务过程中显示实际进度与分类大小。
+- 恢复前先查看归档及当前目标的分类大小、覆盖数量与警告，再勾选要恢复的类别并一键执行；恢复前会自动创建回滚快照。恢复采用逐文件覆盖/新增，不会因归档缺少某文件而删除现有文件。
+- 备份 ZIP 本身未加密。凭据类别包含加密密钥库和 RSA 密钥材料，拿到备份的人可能据此解密 API Key；请像密码一样保管。
 - 存储与数据页的清理、人格运行数据删除和本地卸载都需要预览、确认短语和勾选，危险操作默认不备份。
 - 安装器会依据 Release 校验资产 SHA256；第三方镜像只能加速下载，不能代替发布方校验。
 - 你发送的对话内容会到达所配置的模型提供商，请留意其数据政策。
@@ -625,7 +627,7 @@ python3 -m compileall -q webui
 
 | 版本 | 状态 |
 |---|---|
-| `v2.1.0-alpha` | 当前最新版本（安全审计修复、跨平台稳定性和容器导出加固） |
+| `v2.1.3-alpha` | 当前 Latest 正式发行版（可选内容备份与分类恢复、设置引导优化） |
 | `v2.0.1-alpha.1` | 上一版（无渠道启动修复） |
 | `v2.0.1-alpha` | 上一版（WebUI 局域网开关、快捷方式图标修复、工具档位移位） |
 | `v2.0.0-alpha.1` | 上一版（支持后端/前端分开更新） |
@@ -640,18 +642,18 @@ v2 的组件版本、资产和更新规则见 [`docs/distribution.md`](docs/dist
 - 安装器：<https://github.com/CN-BI5UNF/KarenBot-Installer>
 - 问题反馈：<https://github.com/CN-BI5UNF/KarenBot/issues>
 - 更新日志：[`releases/`](releases/)
-- 后端文档：[`KarenBot-backend/docs`](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs)
+- 后端文档：[`KarenBot-backend/docs`](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.3-alpha/docs)
 
 常用专题文档：
 
 | 文档 | 内容 |
 |---|---|
-| [容器](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/container.md) | Docker 容器、存储模式、文件管理与故障排查 |
-| [Agent 模式](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/agent_modes.md) | Pi / DSH / Claude Code 工具语义 |
-| [后台运行](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/background_running.md) | systemd、tmux 与内置后台模式 |
-| [外部程序](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/external_programs.md) | 启动、探测、重启与关闭策略 |
-| [协议支持](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs/protocols) | OneBot 11、Telegram、QQ 官方 Bot、Satori |
-| [功能文档](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs/feature_guides) | 视觉、TTS、联网搜索、天气、RAG、知识、黑话 |
+| [容器](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/container.md) | Docker 容器、存储模式、文件管理与故障排查 |
+| [Agent 模式](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/agent_modes.md) | Pi / DSH / Claude Code 工具语义 |
+| [后台运行](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/background_running.md) | systemd、tmux 与内置后台模式 |
+| [外部程序](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/external_programs.md) | 启动、探测、重启与关闭策略 |
+| [协议支持](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.3-alpha/docs/protocols) | OneBot 11、Telegram、QQ 官方 Bot、Satori |
+| [功能文档](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.3-alpha/docs/feature_guides) | 视觉、TTS、联网搜索、天气、RAG、知识、黑话 |
 
 提交 Issue 时请尽量附上：
 

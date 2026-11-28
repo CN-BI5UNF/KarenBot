@@ -34,10 +34,19 @@ jobs:
         run: |
           tag="${{ github.event.inputs.tag || github.ref_name }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          case "$tag" in
-            *-alpha*|*-beta*|*-rc*) echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT" ;;
-            *) echo "prerelease=" >> "$GITHUB_OUTPUT" ;;
-          esac
+          # v2.1.3-alpha is intentionally published as the official latest
+          # release despite its compatibility tag suffix. Other alpha/beta/rc
+          # builds remain pre-releases.
+          if [ "$tag" = "v2.1.3-alpha" ]; then
+            echo "prerelease=" >> "$GITHUB_OUTPUT"
+            echo "latest=--latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest=" >> "$GITHUB_OUTPUT"
+            case "$tag" in
+              *-alpha*|*-beta*|*-rc*) echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT" ;;
+              *) echo "prerelease=" >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
 
       - name: Verify submodule lock
         run: python scripts/verify_modules.py --tag "${{ steps.vars.outputs.tag }}"
@@ -69,11 +78,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.vars.outputs.tag }}
           PRERELEASE: ${{ steps.vars.outputs.prerelease }}
+          LATEST: ${{ steps.vars.outputs.latest }}
         shell: bash
         run: |
           notes="releases/$TAG.md"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/modules.json dist/*.tar.gz --clobber
+            if [ "$TAG" = "v2.1.3-alpha" ]; then
+              gh release edit "$TAG" --prerelease=false --latest
+            fi
           else
             args=("$TAG" dist/modules.json dist/*.tar.gz --title "KarenBot $TAG")
             if [ -f "$notes" ]; then
@@ -83,6 +96,9 @@ jobs:
             fi
             if [ -n "$PRERELEASE" ]; then
               args+=("$PRERELEASE")
+            fi
+            if [ -n "$LATEST" ]; then
+              args+=("$LATEST")
             fi
             gh release create "${args[@]}"
           fi

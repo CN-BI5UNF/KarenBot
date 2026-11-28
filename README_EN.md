@@ -5,7 +5,7 @@
 | Quick access | Link |
 |---|---|
 | **简体中文 README** | [README.md](README.md) |
-| **Current release** | [v2.1.0-alpha](https://github.com/CN-BI5UNF/KarenBot/releases/tag/v2.1.0-alpha) |
+| **Current release** | [v2.1.3-alpha](https://github.com/CN-BI5UNF/KarenBot/releases/tag/v2.1.3-alpha) |
 | **Official installer** | [KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha) |
 | **Release notes** | [releases/](releases/) |
 | **Issues** | [GitHub Issues](https://github.com/CN-BI5UNF/KarenBot/issues) |
@@ -17,7 +17,7 @@ KarenBot began as a rework of [Debata_Agent](https://github.com/binglang001/Deba
 
 Everything is local-first: chat history, personas, keys, knowledge, and workspaces stay on your machine, and model requests go only to the providers you configure.
 
-> `v2.1.0-alpha` is the current release but is still an alpha preview; interfaces and data formats may change, so back up before upgrading. v2 is a unified distribution: the backend and the selected frontend update together, though either component can also be updated alone from the Updates page.
+> `v2.1.3-alpha` is the current **Latest release** and is published as a normal GitHub release (not a pre-release). The alpha suffix remains for tag compatibility. Back up before upgrading. v2 is a unified distribution: the backend and selected frontend update together, though either component can also be updated alone from the Updates page.
 
 ---
 
@@ -309,7 +309,7 @@ A browser console for servers, phones, and tablets.
 
 ## Installation
 
-The recommended path is the official **[KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha)**. The installer and the application are released separately; the Linux commands below pin application `v2.1.0-alpha`.
+The recommended path is the official **[KarenBot Installer v2.0.0-alpha](https://github.com/CN-BI5UNF/KarenBot-Installer/releases/tag/v2.0.0-alpha)**. The installer and the application are released separately; the Linux commands below pin application `v2.1.3-alpha`.
 
 ### Windows 10/11 (x64)
 
@@ -322,7 +322,7 @@ The recommended path is the official **[KarenBot Installer v2.0.0-alpha](https:/
 4. Select **Online installation** and wait for the download and verification to finish.
 5. Launch KarenBot from the desktop or Start Menu.
 
-The Windows native GUI uses a separately downloaded portable GTK4 bundle, so you do not need to install GTK yourself. The application version inside that bundle depends on how it was built; to run `v2.1.0-alpha`, choose it under **Settings → Updates** after installation. Windows WebUI downloads a portable Python on demand and creates a browser launch entry.
+The Windows native GUI uses a separately downloaded portable GTK4 bundle, so you do not need to install GTK yourself. The application version inside that bundle depends on how it was built; to run `v2.1.3-alpha`, choose it under **Settings → Updates** after installation. Windows WebUI downloads a portable Python on demand and creates a browser launch entry.
 
 ### Linux (x64 / arm64)
 
@@ -344,14 +344,14 @@ Then follow the menu:
 - frontend: `GUI` or `WebUI`;
 - install directory (default `~/.local/opt/karenbot`).
 
-You can also pass the options directly in the same terminal to install KarenBot `v2.1.0-alpha` explicitly:
+You can also pass the options directly in the same terminal to install KarenBot `v2.1.3-alpha` explicitly:
 
 ```bash
 # WebUI
-bash install.sh --online --frontend webui --tag v2.1.0-alpha --dir ~/.local/opt/karenbot
+bash install.sh --online --frontend webui --tag v2.1.3-alpha --dir ~/.local/opt/karenbot
 
 # Native GUI
-bash install.sh --online --frontend gui --tag v2.1.0-alpha --dir ~/.local/opt/karenbot
+bash install.sh --online --frontend gui --tag v2.1.3-alpha --dir ~/.local/opt/karenbot
 ```
 
 If GitHub access is unreliable, follow the installer README's multi-mirror download and hash verification steps:
@@ -436,7 +436,7 @@ karen disable   # disable at boot
 ```
 
 The commands prefer a systemd user service. Without a systemd user session, they fall back to a PID-file + detached-process mode; tmux, screen, and nohup also work. See the backend's
-[background running guide](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/background_running.md).
+[background running guide](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/background_running.md).
 
 ### Headless / servers
 
@@ -497,7 +497,7 @@ cd KarenBot
 git submodule update --init --recursive
 
 # Verify the version lock
-python scripts/verify_modules.py --tag v2.1.0-alpha
+python scripts/verify_modules.py --tag v2.1.3-alpha
 
 # Assemble a runnable directory (tracked files only)
 python scripts/assemble.py --frontend webui --output dist/app
@@ -557,7 +557,7 @@ Install the transition release first, then upgrade to v2:
 1. Backend `v0.1.11-alpha.1`;
 2. GUI/WebUI `v0.1.1-alpha.2`;
 3. Restart the application;
-4. Manually select the latest v2 release in the Updates page (currently `v2.1.0-alpha`).
+4. Manually select the latest v2 release in the Updates page (currently `v2.1.3-alpha`).
 
 See [`docs/transition.md`](docs/transition.md) for details.
 
@@ -578,7 +578,9 @@ The old "backend + WebUI bound" release line is no longer supported. Back up you
   - `plugins/`
   - `config.yaml`
   - `secrets.*`
-- Settings provide one-click backup of configuration, encryption keys, chat history, RAG data, workspaces, and personas; backups contain sensitive credentials, so store them safely.
+- **Settings → Backup** lets you select configuration, credentials, chats, RAG, workspace, emoji, provider presets, and personas. Per-category sizes appear before creation and actual category progress is reported while the archive is built.
+- Before restore, review the archive and current target sizes, overwrite counts, and warnings; then select categories and run one-click restore. KarenBot creates a rollback snapshot first. Restore overlays verified files and does not delete current files missing from the archive.
+- Backup ZIP files are not encrypted. The credentials category contains encrypted key-store and RSA material that may allow API keys to be decrypted; protect the archive like a password.
 - Cleanup, persona runtime data deletion, and local uninstall on the Storage & data page require a preview, a confirmation phrase, and a checkbox; dangerous operations do not back up by default.
 - The installer verifies SHA256 values for release assets; third-party mirrors can speed up transfers but cannot replace publisher verification.
 - Model providers receive the conversation content you send them; review each provider's data policy.
@@ -625,7 +627,7 @@ A backend update requires a backend restart; a GUI update requires fully quittin
 
 | Version | Status |
 |---|---|
-| `v2.1.0-alpha` | Current release (security audit fixes, cross-platform stability, and hardened container exports) |
+| `v2.1.3-alpha` | Current Latest release, published as a normal release (selectable backups and per-category restore) |
 | `v2.0.1-alpha.1` | Previous release (no-channel startup fix) |
 | `v2.0.1-alpha` | Previous release (WebUI LAN switch, shortcut icon fixes, tool profile move) |
 | `v2.0.0-alpha.1` | Previous release (separate backend/frontend updates) |
@@ -640,18 +642,18 @@ See [`docs/distribution.md`](docs/distribution.md) for v2 component versions, as
 - Installer: <https://github.com/CN-BI5UNF/KarenBot-Installer>
 - Issues: <https://github.com/CN-BI5UNF/KarenBot/issues>
 - Release notes: [`releases/`](releases/)
-- Backend docs: [`KarenBot-backend/docs`](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs)
+- Backend docs: [`KarenBot-backend/docs`](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.3-alpha/docs)
 
 Topic guides:
 
 | Document | Contents |
 |---|---|
-| [Container](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/container.md) | Docker container, storage modes, file manager, troubleshooting |
-| [Agent modes](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/agent_modes.md) | Pi / DSH / Claude Code tool semantics |
-| [Background running](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/background_running.md) | systemd, tmux, and built-in background mode |
-| [External programs](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.0-alpha/docs/external_programs.md) | Startup, probing, restart, and shutdown policies |
-| [Protocols](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs/protocols) | OneBot 11, Telegram, QQ Official Bot, Satori |
-| [Feature guides](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.0-alpha/docs/feature_guides) | Vision, TTS, web search, weather, RAG, knowledge, slang |
+| [Container](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/container.md) | Docker container, storage modes, file manager, troubleshooting |
+| [Agent modes](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/agent_modes.md) | Pi / DSH / Claude Code tool semantics |
+| [Background running](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/background_running.md) | systemd, tmux, and built-in background mode |
+| [External programs](https://github.com/CN-BI5UNF/KarenBot-backend/blob/v2.1.3-alpha/docs/external_programs.md) | Startup, probing, restart, and shutdown policies |
+| [Protocols](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.3-alpha/docs/protocols) | OneBot 11, Telegram, QQ Official Bot, Satori |
+| [Feature guides](https://github.com/CN-BI5UNF/KarenBot-backend/tree/v2.1.3-alpha/docs/feature_guides) | Vision, TTS, web search, weather, RAG, knowledge, slang |
 
 When filing an issue, please include:
 

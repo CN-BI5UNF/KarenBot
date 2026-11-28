@@ -14,7 +14,7 @@ KarenBot-GUI-<tag>.tar.gz
 KarenBot-WebUI-<tag>.tar.gz
 ```
 
-`<tag>` 例如 `v2.1.0-alpha`。资产由 `.github/workflows/release.yml` 调用
+`<tag>` 例如 `v2.1.3-alpha`。资产由 `.github/workflows/release.yml` 调用
 `scripts/build_release_assets.py` 从 `modules.lock.json` 固定的 commit 生成。
 
 ## modules.json
@@ -22,13 +22,13 @@ KarenBot-WebUI-<tag>.tar.gz
 ```json
 {
   "schema": 1,
-  "release": "v2.1.0-alpha",
+  "release": "v2.1.3-alpha",
   "components": {
     "backend": {
       "repo": "CN-BI5UNF/KarenBot-backend",
-      "tag": "v2.1.0-alpha",
-      "version": "2.1.0-alpha",
-      "asset": "KarenBot-backend-v2.1.0-alpha.tar.gz",
+      "tag": "v2.1.3-alpha",
+      "version": "2.1.3-alpha",
+      "asset": "KarenBot-backend-v2.1.3-alpha.tar.gz",
       "sha256": "64 位十六进制",
       "size": 123456
     },
@@ -43,7 +43,7 @@ KarenBot-WebUI-<tag>.tar.gz
 
 ## 安装器步骤
 
-1. 解析用户选择的 tag；默认使用最新稳定 Release，alpha/beta 需用户显式选择。
+1. 解析用户选择的 tag；默认使用 GitHub 标记的 Latest 普通 Release。`v2.1.3-alpha` 是本项目明确发布为 Latest、非预发布的版本；其它 alpha/beta 仍需用户显式选择。
 2. 从 `https://github.com/CN-BI5UNF/KarenBot/releases/download/<tag>/modules.json`
    下载 manifest。
 3. 根据用户选择的前端（`gui` 或 `webui`）下载：
@@ -60,10 +60,10 @@ KarenBot-WebUI-<tag>.tar.gz
    {
      "schema": 1,
      "frontend": "gui",
-     "distribution": {"repo": "CN-BI5UNF/KarenBot", "tag": "v2.1.0-alpha"},
+     "distribution": {"repo": "CN-BI5UNF/KarenBot", "tag": "v2.1.3-alpha"},
      "components": {
-       "backend": {"repo": "...", "dir": "backend", "tag": "v2.1.0-alpha", "version": "2.1.0-alpha"},
-       "gui": {"repo": "...", "dir": "gui", "tag": "v2.1.0-alpha", "version": "2.1.0-alpha"}
+       "backend": {"repo": "...", "dir": "backend", "tag": "v2.1.3-alpha", "version": "2.1.3-alpha"},
+       "gui": {"repo": "...", "dir": "gui", "tag": "v2.1.3-alpha", "version": "2.1.3-alpha"}
      }
    }
    ```
@@ -84,7 +84,7 @@ KarenBot-WebUI-<tag>.tar.gz
 
 1. 安装后端 `v0.1.11-alpha.1` 与 GUI/WebUI `v0.1.1-alpha.2`（稳定过渡补丁）；
 2. 重启应用；
-3. 在更新页手动选择 `v2.1.0-alpha`（Pre-release）；
+3. 在更新页手动选择 `v2.1.3-alpha`（Latest 普通 Release，非预发布）；
 4. 更新器默认同时写后端与当前前端，也可以在更新页只选择其中一个组件。
 
 过渡版的后端更新器只读取 KarenBot 主仓库的 `modules.json` 发行版；它不会再从三个
